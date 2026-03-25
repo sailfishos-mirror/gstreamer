@@ -315,10 +315,13 @@ static const struct h265_profile_string h265_profiles[] = {
 
 static gboolean
 gst_h265_parse_profile_tier_level (GstH265ProfileTierLevel * ptl,
-    NalReader * nr, guint8 maxNumSubLayersMinus1)
+    NalReader * nr, gboolean profile_present_flag, guint8 maxNumSubLayersMinus1)
 {
   guint i, j;
   GST_DEBUG ("parsing \"ProfileTierLevel parameters\"");
+
+  if (!profile_present_flag)
+    goto parse_level;
 
   READ_UINT8 (nr, ptl->profile_space, 2);
   READ_UINT8 (nr, ptl->tier_flag, 1);
@@ -347,6 +350,7 @@ gst_h265_parse_profile_tier_level (GstH265ProfileTierLevel * ptl,
   if (!nal_reader_skip (nr, 34))
     goto error;
 
+parse_level:
   READ_UINT8 (nr, ptl->level_idc, 8);
   for (j = 0; j < maxNumSubLayersMinus1; j++) {
     READ_UINT8 (nr, ptl->sub_layer_profile_present_flag[j], 1);
@@ -1857,6 +1861,100 @@ gst_h265_parser_parse_vps (GstH265Parser * parser, GstH265NalUnit * nalu,
   return res;
 }
 
+static gboolean
+gst_h265_parse_vps_extension_params (GstH265VPS * vps, NalReader * nr)
+{
+  GstH265VPSExtensionParams *ext = &vps->vps_extension_params;
+  guint i, j;
+  guint dimBitOffset[GST_H265_MAX_VPS_DIMENSIONS + 1] = { 0, };
+
+  if (vps->max_layers_minus1 > 0 && vps->base_layer_internal_flag) {
+    /* TODO: expose this extra PTL if needed */
+    GstH265ProfileTierLevel ptl;
+    if (!gst_h265_parse_profile_tier_level (&ptl,
+            nr, FALSE, vps->max_sub_layers_minus1)) {
+      goto error;
+    }
+  }
+
+  READ_UINT8 (nr, ext->splitting_flag, 1);
+
+  for (i = 0; i < GST_H265_MAX_VPS_DIMENSIONS; i++) {
+    READ_UINT8 (nr, ext->scalability_mask_flag[i], 1);
+    if (ext->scalability_mask_flag[i])
+      ext->num_scalability_types++;
+  }
+
+  if (ext->num_scalability_types < ext->splitting_flag) {
+    GST_WARNING ("num_scalability_types=0, need at least 1");
+    goto error;
+  }
+
+  for (i = 0; i < ext->num_scalability_types - ext->splitting_flag; i++)
+    READ_UINT8 (nr, ext->dimension_id_len_minus1[i], 3);
+
+  if (ext->splitting_flag && ext->num_scalability_types > 0) {
+    dimBitOffset[0] = 0;
+    for (j = 1; j < ext->num_scalability_types; j++) {
+      guint dimIdx;
+      guint sum = 0;
+      for (dimIdx = 0; dimIdx < j; dimIdx++)
+        sum += ext->dimension_id_len_minus1[dimIdx] + 1;
+
+      dimBitOffset[j] = sum;
+    }
+
+    if (dimBitOffset[ext->num_scalability_types - 1] > 5) {
+      GST_WARNING ("dimension_id_len_minus1 too large");
+      goto error;
+    }
+
+    ext->dimension_id_len_minus1[ext->num_scalability_types - 1] =
+        5 - dimBitOffset[ext->num_scalability_types - 1];
+    dimBitOffset[ext->num_scalability_types] = 6;
+  }
+
+  READ_UINT8 (nr, ext->vps_nuh_layer_id_present_flag, 1);
+  for (i = 1; i <= vps->max_layers_minus1; i++) {
+    if (ext->vps_nuh_layer_id_present_flag) {
+      READ_UINT8 (nr, ext->layer_id_in_nuh[i], 6);
+    } else {
+      ext->layer_id_in_nuh[i] = i;
+    }
+
+    if (!ext->splitting_flag) {
+      for (j = 0; j < ext->num_scalability_types; j++) {
+        guint dim_len = ext->dimension_id_len_minus1[j] + 1;
+        READ_UINT8 (nr, ext->dimension_id[i][j], dim_len);
+      }
+    } else {
+      for (j = 0; j < ext->num_scalability_types; j++) {
+        ext->dimension_id[i][j] =
+            (ext->layer_id_in_nuh[i] & ((1 << dimBitOffset[j + 1]) - 1))
+            >> dimBitOffset[j];
+      }
+    }
+  }
+
+  for (i = 0; i <= vps->max_layers_minus1; i++) {
+    guint smIdx;
+    for (smIdx = 0, j = 0; smIdx < 16; smIdx++) {
+      if (ext->scalability_mask_flag[smIdx])
+        ext->scalability_id[i][smIdx] = ext->dimension_id[i][j++];
+      else
+        ext->scalability_id[i][smIdx] = 0;
+    }
+  }
+
+  ext->valid = TRUE;
+
+  return TRUE;
+
+error:
+  GST_WARNING ("error parsing \"Video parameter set extension\"");
+  return FALSE;
+}
+
 /**
  * gst_h265_parse_vps:
  * @nalu: The %GST_H265_NAL_VPS #GstH265NalUnit to parse
@@ -1896,7 +1994,7 @@ gst_h265_parse_vps (GstH265NalUnit * nalu, GstH265VPS * vps)
     goto error;
 
   if (!gst_h265_parse_profile_tier_level (&vps->profile_tier_level, &nr,
-          vps->max_sub_layers_minus1))
+          TRUE, vps->max_sub_layers_minus1))
     goto error;
 
   READ_UINT8 (&nr, vps->sub_layer_ordering_info_present_flag, 1);
@@ -1991,6 +2089,24 @@ gst_h265_parse_vps (GstH265NalUnit * nalu, GstH265VPS * vps)
     }
   }
   READ_UINT8 (&nr, vps->vps_extension, 1);
+
+  if (vps->vps_extension) {
+    while (!nal_reader_is_byte_aligned (&nr)) {
+      guint8 bit;
+
+      /* vps_extension_alignment_bit_equal_to_one */
+      READ_UINT8 (&nr, bit, 1);
+      if (bit != 1) {
+        GST_WARNING ("Zero extension alignment bit value");
+        vps->vps_extension = 0;
+        goto done;
+      }
+    }
+
+    gst_h265_parse_vps_extension_params (vps, &nr);
+  }
+
+done:
   vps->valid = TRUE;
 
   return GST_H265_PARSER_OK;
@@ -2090,7 +2206,7 @@ gst_h265_parse_sps_ext (GstH265Parser * parser, GstH265NalUnit * nalu,
   READ_UINT8 (&nr, sps->temporal_id_nesting_flag, 1);
 
   if (!gst_h265_parse_profile_tier_level (&sps->profile_tier_level, &nr,
-          sps->max_sub_layers_minus1))
+          TRUE, sps->max_sub_layers_minus1))
     goto error;
 
   READ_UE_MAX (&nr, sps->id, GST_H265_MAX_SPS_COUNT - 1);

@@ -33,10 +33,47 @@
 
 G_BEGIN_DECLS
 
+/**
+ * GST_H265_MAX_SUB_LAYERS:
+ *
+ * Maximum number of temporal sub-layers that can be present
+ */
 #define GST_H265_MAX_SUB_LAYERS   8
+/**
+ * GST_H265_MAX_VPS_COUNT:
+ *
+ * Maximum number of VPS that can be present
+ */
 #define GST_H265_MAX_VPS_COUNT   16
+/**
+ * GST_H265_MAX_SPS_COUNT:
+ *
+ * Maximum number of SPS that can be present
+ */
 #define GST_H265_MAX_SPS_COUNT   16
+/**
+ * GST_H265_MAX_PPS_COUNT:
+ *
+ * Maximum number of PPS that can be present
+ */
 #define GST_H265_MAX_PPS_COUNT   64
+/**
+ * GST_H265_MAX_LAYERS:
+ *
+ * Maximum number of layers in a multi-layer (SHVC / MV-HEVC / HEVC+Alpha)
+ * bitstream
+ *
+ * Since: 1.30
+ */
+#define GST_H265_MAX_LAYERS      64
+/**
+ * GST_H265_MAX_VPS_DIMENSIONS:
+ *
+ * Maximum number of scalability dimensions signalled in the VPS extension
+ *
+ * Since: 1.30
+ */
+#define GST_H265_MAX_VPS_DIMENSIONS 16
 
 #define GST_H265_IS_B_SLICE(slice)  ((slice)->type == GST_H265_B_SLICE)
 #define GST_H265_IS_P_SLICE(slice)  ((slice)->type == GST_H265_P_SLICE)
@@ -473,6 +510,7 @@ typedef struct _GstH265Parser                   GstH265Parser;
 typedef struct _GstH265NalUnit                  GstH265NalUnit;
 
 typedef struct _GstH265VPS                      GstH265VPS;
+typedef struct _GstH265VPSExtensionParams       GstH265VPSExtensionParams;
 typedef struct _GstH265SPS                      GstH265SPS;
 typedef struct _GstH265SPSEXT                   GstH265SPSEXT;
 typedef struct _GstH265PPS                      GstH265PPS;
@@ -704,6 +742,69 @@ struct _GstH265HRDParams
 };
 
 /**
+ * GstH265ScalabilityId:
+ *
+ * ScalabilityId as defined in the spec Table F.1
+ *
+ * Since: 1.30
+ */
+typedef enum
+{
+  GST_H265_SCALABILITY_ID_DEPTH_LAYER_FLAG = 0,
+  GST_H265_SCALABILITY_ID_VIEW_ORDER_IDX,
+  GST_H265_SCALABILITY_ID_DEPENDENCY_ID,
+  GST_H265_SCALABILITY_ID_AUX_ID,
+} GstH265ScalabilityId;
+
+/**
+ * GST_H265_AUX_ALPHA:
+ *
+ * Auxiliary alpha layer, as defined in the spec Table F.2
+ *
+ * Since: 1.30
+ */
+#define GST_H265_AUX_ALPHA 1
+/**
+ * GST_H265_AUX_DEPTH:
+ *
+ * Auxiliary depth layer, as defined in the spec Table F.2
+ *
+ * Since: 1.30
+ */
+#define GST_H265_AUX_DEPTH 2
+
+/**
+ * GstH265VPSExtensionParams:
+ * @splitting_flag: whether dimension_id values are derived from layer_id_in_nuh
+ * @scalability_mask_flag: scalability mask flags indexed by scalability type
+ * @num_scalability_types: number of enabled scalability types
+ * @dimension_id_len_minus1: dimension_id lengths for enabled scalability types
+ * @vps_nuh_layer_id_present_flag: whether layer_id_in_nuh values are coded explicitly
+ * @layer_id_in_nuh: layer id values for layers in the extension
+ * @dimension_id: parsed or derived dimension_id values indexed by layer and enabled type index
+ * @scalability_id: derived scalability_id values indexed by layer and scalability type
+ * @valid: whether the extension was parsed successfully
+ *
+ * Defines the VPS extension parameters
+ *
+ * Since: 1.30
+ */
+struct _GstH265VPSExtensionParams
+{
+  guint8 splitting_flag;
+  guint8 scalability_mask_flag[GST_H265_MAX_VPS_DIMENSIONS];
+  guint8 num_scalability_types;
+  guint8 dimension_id_len_minus1[GST_H265_MAX_VPS_DIMENSIONS];
+  guint8 vps_nuh_layer_id_present_flag;
+  guint8 layer_id_in_nuh[GST_H265_MAX_LAYERS];
+  guint8 dimension_id[GST_H265_MAX_LAYERS][GST_H265_MAX_VPS_DIMENSIONS];
+  guint8 scalability_id[GST_H265_MAX_LAYERS][GST_H265_MAX_VPS_DIMENSIONS];
+
+  gboolean valid;
+};
+
+
+/**
  * GstH265VPS:
  * @id: vps id
  * @base_layer_internal_flag and @base_layer_available_flag:
@@ -740,6 +841,8 @@ struct _GstH265HRDParams
  * @num_hrd_parameters: number of hrd_parameters present
  * @hrd_layer_set_idx: index to the list of layer hrd params.
  * @hrd_params: the GstH265HRDParams list
+ * @vps_extension: indicates the presence of the VPS extension (Since: 1.30)
+ * @vps_extension_params: the VPS extension parameters (Since: 1.30)
  *
  * Defines the VPS parameters
  */
@@ -777,6 +880,14 @@ struct _GstH265VPS {
   GstH265HRDParams hrd_params;
 
   guint8 vps_extension;
+  /**
+   * GstH265VPS.vps_extension_params:
+   *
+   * VPS extension parameters
+   *
+   * Since: 1.30
+   */
+  GstH265VPSExtensionParams vps_extension_params;
 
   gboolean valid;
 };

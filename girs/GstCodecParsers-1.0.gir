@@ -7407,6 +7407,18 @@ Defines the _GstH265SPSSccExtensionParams</doc>
         <type name="guint8" c:type="guint8"/>
       </field>
     </record>
+    <enumeration name="H265ScalabilityId" version="1.30" c:type="GstH265ScalabilityId">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">ScalabilityId as defined in the spec Table F.1</doc>
+      <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
+      <member name="depth_layer_flag" value="0" c:identifier="GST_H265_SCALABILITY_ID_DEPTH_LAYER_FLAG">
+      </member>
+      <member name="view_order_idx" value="1" c:identifier="GST_H265_SCALABILITY_ID_VIEW_ORDER_IDX">
+      </member>
+      <member name="dependency_id" value="2" c:identifier="GST_H265_SCALABILITY_ID_DEPENDENCY_ID">
+      </member>
+      <member name="aux_id" value="3" c:identifier="GST_H265_SCALABILITY_ID_AUX_ID">
+      </member>
+    </enumeration>
     <record name="H265ScalingList" c:type="GstH265ScalingList">
       <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Defines the GstH265ScalingList</doc>
       <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
@@ -8123,9 +8135,64 @@ D.2.27</doc>
         <type name="H265HRDParams" c:type="GstH265HRDParams"/>
       </field>
       <field name="vps_extension" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">indicates the presence of the VPS extension (Since: 1.30)</doc>
         <type name="guint8" c:type="guint8"/>
       </field>
+      <field name="vps_extension_params" version="1.30" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">VPS extension parameters</doc>
+        <type name="H265VPSExtensionParams" c:type="GstH265VPSExtensionParams"/>
+      </field>
       <field name="valid" writable="1">
+        <type name="gboolean" c:type="gboolean"/>
+      </field>
+    </record>
+    <record name="H265VPSExtensionParams" c:type="GstH265VPSExtensionParams" version="1.30">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Defines the VPS extension parameters</doc>
+      <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
+      <field name="splitting_flag" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">whether dimension_id values are derived from layer_id_in_nuh</doc>
+        <type name="guint8" c:type="guint8"/>
+      </field>
+      <field name="scalability_mask_flag" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">scalability mask flags indexed by scalability type</doc>
+        <array zero-terminated="0" fixed-size="16">
+          <type name="guint8" c:type="guint8"/>
+        </array>
+      </field>
+      <field name="num_scalability_types" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">number of enabled scalability types</doc>
+        <type name="guint8" c:type="guint8"/>
+      </field>
+      <field name="dimension_id_len_minus1" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">dimension_id lengths for enabled scalability types</doc>
+        <array zero-terminated="0" fixed-size="16">
+          <type name="guint8" c:type="guint8"/>
+        </array>
+      </field>
+      <field name="vps_nuh_layer_id_present_flag" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">whether layer_id_in_nuh values are coded explicitly</doc>
+        <type name="guint8" c:type="guint8"/>
+      </field>
+      <field name="layer_id_in_nuh" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">layer id values for layers in the extension</doc>
+        <array zero-terminated="0" fixed-size="64">
+          <type name="guint8" c:type="guint8"/>
+        </array>
+      </field>
+      <field name="dimension_id" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">parsed or derived dimension_id values indexed by layer and enabled type index</doc>
+        <array zero-terminated="0" fixed-size="1024">
+          <type name="guint8" c:type="guint8"/>
+        </array>
+      </field>
+      <field name="scalability_id" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">derived scalability_id values indexed by layer and scalability type</doc>
+        <array zero-terminated="0" fixed-size="1024">
+          <type name="guint8" c:type="guint8"/>
+        </array>
+      </field>
+      <field name="valid" writable="1">
+        <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">whether the extension was parsed successfully</doc>
         <type name="gboolean" c:type="gboolean"/>
       </field>
     </record>
@@ -8323,6 +8390,16 @@ motion vector component</doc>
         <type name="guint" c:type="guint"/>
       </field>
     </record>
+    <constant name="H265_AUX_ALPHA" value="1" c:type="GST_H265_AUX_ALPHA" version="1.30">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Auxiliary alpha layer, as defined in the spec Table F.2</doc>
+      <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
+      <type name="gint" c:type="gint"/>
+    </constant>
+    <constant name="H265_AUX_DEPTH" value="2" c:type="GST_H265_AUX_DEPTH" version="1.30">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Auxiliary depth layer, as defined in the spec Table F.2</doc>
+      <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
+      <type name="gint" c:type="gint"/>
+    </constant>
     <function-macro name="H265_IS_B_SLICE" c:identifier="GST_H265_IS_B_SLICE" introspectable="0">
       <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
       <parameters>
@@ -8398,19 +8475,34 @@ motion vector component</doc>
         </parameter>
       </parameters>
     </function-macro>
+    <constant name="H265_MAX_LAYERS" value="64" c:type="GST_H265_MAX_LAYERS" version="1.30">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Maximum number of layers in a multi-layer (SHVC / MV-HEVC / HEVC+Alpha)
+bitstream</doc>
+      <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
+      <type name="gint" c:type="gint"/>
+    </constant>
     <constant name="H265_MAX_PPS_COUNT" value="64" c:type="GST_H265_MAX_PPS_COUNT">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Maximum number of PPS that can be present</doc>
       <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
       <type name="gint" c:type="gint"/>
     </constant>
     <constant name="H265_MAX_SPS_COUNT" value="16" c:type="GST_H265_MAX_SPS_COUNT">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Maximum number of SPS that can be present</doc>
       <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
       <type name="gint" c:type="gint"/>
     </constant>
     <constant name="H265_MAX_SUB_LAYERS" value="8" c:type="GST_H265_MAX_SUB_LAYERS">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Maximum number of temporal sub-layers that can be present</doc>
       <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
       <type name="gint" c:type="gint"/>
     </constant>
     <constant name="H265_MAX_VPS_COUNT" value="16" c:type="GST_H265_MAX_VPS_COUNT">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Maximum number of VPS that can be present</doc>
+      <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
+      <type name="gint" c:type="gint"/>
+    </constant>
+    <constant name="H265_MAX_VPS_DIMENSIONS" value="16" c:type="GST_H265_MAX_VPS_DIMENSIONS" version="1.30">
+      <doc xml:space="preserve" filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h">Maximum number of scalability dimensions signalled in the VPS extension</doc>
       <source-position filename="../subprojects/gst-plugins-bad/gst-libs/gst/codecparsers/gsth265parser.h"/>
       <type name="gint" c:type="gint"/>
     </constant>
