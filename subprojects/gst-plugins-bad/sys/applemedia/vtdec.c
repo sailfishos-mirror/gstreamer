@@ -61,6 +61,7 @@
 #include <gst/gl/gstglcontext.h>
 #include <gst/codecparsers/gstav1parser.h>
 #include <gst/codecparsers/gsth264parser.h>
+#include <gst/codecparsers/gsth265parser.h>
 
 #include "vtutil.h"
 #include "helpers.h"
@@ -165,6 +166,14 @@ enum
   VTDEC_FRAME_FLAG_ERROR = (1 << 12),
 };
 
+#define GST_VTDEC_CODEC_TYPE_IS_PRORES(codec) \
+    ((codec) == kCMVideoCodecType_AppleProRes422 \
+    || (codec) == kCMVideoCodecType_AppleProRes4444XQ \
+    || (codec) == kCMVideoCodecType_AppleProRes4444 \
+    || (codec) == kCMVideoCodecType_AppleProRes422HQ \
+    || (codec) == kCMVideoCodecType_AppleProRes422LT \
+    || (codec) == kCMVideoCodecType_AppleProRes422Proxy)
+
 static void gst_vtdec_finalize (GObject * object);
 
 static gboolean gst_vtdec_start (GstVideoDecoder * decoder);
@@ -203,6 +212,8 @@ static gboolean compute_h264_decode_picture_buffer_size (GstVtdec * vtdec,
     GstBuffer * codec_data, int *length);
 static gboolean compute_hevc_decode_picture_buffer_size (GstVtdec * vtdec,
     GstBuffer * codec_data, int *length);
+static gboolean gst_vtdec_hevc_codec_data_has_alpha (GstVtdec * vtdec,
+    GstBuffer * codec_data);
 static gboolean gst_vtdec_compute_dpb_size (GstVtdec * vtdec,
     CMVideoCodecType cm_format, GstBuffer * codec_data);
 static gboolean gst_vtdec_check_vp9_support (GstVtdec * vtdec);
@@ -238,7 +249,7 @@ static GstStaticPadTemplate gst_vtdec_sink_template =
 
 static SupplementalSupport gst_vtdec_codec_support = NoneSupported;
 
-#define VIDEO_SRC_CAPS_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE }"
+#define VIDEO_SRC_CAPS_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE, BGRA, ARGB }"
 
 #define VIDEO_SRC_CAPS_NATIVE                                           \
     GST_VIDEO_CAPS_MAKE_WITH_FEATURES(GST_CAPS_FEATURE_MEMORY_GL_MEMORY,\
@@ -541,14 +552,17 @@ setup_texture_cache (GstVtdec * vtdec, GstVideoFormat format)
 /*
  * Unconditionally output a high bit-depth + alpha format when decoding Apple
  * ProRes video if downstream supports it.
+ * Also prefer alpha formats if we're decoding HEVC with alpha.
  * TODO: read src_pix_fmt to get the preferred output format
  * https://wiki.multimedia.cx/index.php/Apple_ProRes#Frame_header
  */
 static GstVideoFormat
-get_preferred_video_format (GstStructure * s, gboolean prores)
+get_preferred_video_format (GstStructure * s, gboolean prores,
+    gboolean hevc_alpha)
 {
   const GValue *list = gst_structure_get_value (s, "format");
   guint i, size = gst_value_list_get_size (list);
+
   for (i = 0; i < size; i++) {
     const GValue *value = gst_value_list_get_value (list, i);
     const char *fmt = g_value_get_string (value);
@@ -556,7 +570,12 @@ get_preferred_video_format (GstStructure * s, gboolean prores)
     switch (vfmt) {
       case GST_VIDEO_FORMAT_NV12:
       case GST_VIDEO_FORMAT_P010_10LE:
-        if (!prores)
+        if (!prores && !hevc_alpha)
+          return vfmt;
+        break;
+      case GST_VIDEO_FORMAT_BGRA:
+      case GST_VIDEO_FORMAT_ARGB:
+        if (hevc_alpha)
           return vfmt;
         break;
       case GST_VIDEO_FORMAT_AYUV64:
@@ -671,10 +690,11 @@ gst_vtdec_negotiate (GstVideoDecoder * decoder)
     GstStructure *s = gst_caps_get_structure (caps, 0);
 
     if (gst_structure_has_field_typed (s, "format", GST_TYPE_LIST)) {
-      GstStructure *is = gst_caps_get_structure (vtdec->input_state->caps, 0);
-      const char *name = gst_structure_get_name (is);
+      CMVideoCodecType codec =
+          CMVideoFormatDescriptionGetCodecType (vtdec->format_description);
       format = get_preferred_video_format (s,
-          g_strcmp0 (name, "video/x-prores") == 0);
+          GST_VTDEC_CODEC_TYPE_IS_PRORES (codec),
+          codec == kCMVideoCodecType_HEVCWithAlpha);
     }
 
     if (format == GST_VIDEO_FORMAT_UNKNOWN) {
@@ -836,6 +856,115 @@ gst_vtdec_negotiate (GstVideoDecoder * decoder)
 }
 
 static gboolean
+gst_vtdec_hevc_codec_data_has_alpha (GstVtdec * vtdec, GstBuffer * codec_data)
+{
+  GstH265Parser *parser = NULL;
+  GstH265DecoderConfigRecord *config = NULL;
+  GstMapInfo map;
+  GstH265VPS vps;
+  GstH265SPS sps_bl;
+  GstH265SPS sps_el;
+  gboolean vps_parsed = FALSE;
+  gboolean sps_bl_parsed = FALSE;
+  gboolean sps_el_parsed = FALSE;
+  gboolean has_alpha = FALSE;
+
+  if (!codec_data || !gst_buffer_map (codec_data, &map, GST_MAP_READ))
+    return FALSE;
+
+  parser = gst_h265_parser_new ();
+
+  if (gst_h265_parser_parse_decoder_config_record (parser, map.data, map.size,
+          &config) != GST_H265_PARSER_OK || !config)
+    goto out;
+
+  /* Apple HEVC Video with Alpha Interoperability Profile */
+  for (gint i = 0; i < config->nalu_array->len; i++) {
+    GstH265DecoderConfigRecordNalUnitArray *array =
+        &g_array_index (config->nalu_array,
+        GstH265DecoderConfigRecordNalUnitArray, i);
+
+    for (gint j = 0; j < array->nalu->len; j++) {
+      GstH265NalUnit *nalu = &g_array_index (array->nalu, GstH265NalUnit, j);
+
+      switch (nalu->type) {
+        case GST_H265_NAL_VPS:
+          if (gst_h265_parser_parse_vps (parser, nalu,
+                  &vps) == GST_H265_PARSER_OK) {
+            if (vps.max_layers_minus1 == 1 && vps.vps_extension &&
+                vps.vps_extension_params.valid &&
+                vps.vps_extension_params.scalability_id[1]
+                [GST_H265_SCALABILITY_ID_AUX_ID]
+                == GST_H265_AUX_ALPHA) {
+              vps_parsed = TRUE;
+            }
+          }
+          break;
+        case GST_H265_NAL_SPS:
+          if (nalu->layer_id == 0) {
+            if (gst_h265_parser_parse_sps (parser,
+                    nalu, &sps_bl, FALSE) == GST_H265_PARSER_OK) {
+              sps_bl_parsed = TRUE;
+            }
+          } else if (nalu->layer_id == 1) {
+            if (gst_h265_parser_parse_sps (parser,
+                    nalu, &sps_el, FALSE) == GST_H265_PARSER_OK) {
+              sps_el_parsed = TRUE;
+            }
+          }
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  if (vps_parsed && sps_bl_parsed && sps_el_parsed) {
+    has_alpha = TRUE;
+
+    /* Resolution should be identical */
+    if (sps_bl.width != sps_el.width || sps_bl.height != sps_el.height)
+      has_alpha = FALSE;
+
+    if (has_alpha) {
+      /* 8bits 4:2:0 */
+      if (sps_bl.chroma_format_idc != 1 ||
+          sps_bl.bit_depth_luma_minus8 != 0 ||
+          sps_el.chroma_format_idc != 1 || sps_el.bit_depth_luma_minus8 != 0) {
+        has_alpha = FALSE;
+      }
+    }
+
+    if (has_alpha) {
+      const GstH265ProfileTierLevel *ptl = &sps_bl.profile_tier_level;
+      /* Should be main profile compatible */
+      if (ptl->profile_idc != GST_H265_PROFILE_IDC_MAIN
+          && ptl->profile_compatibility_flag[GST_H265_PROFILE_IDC_MAIN] == 0) {
+        has_alpha = FALSE;
+      }
+    }
+
+    if (has_alpha) {
+      const GstH265ProfileTierLevel *ptl = &sps_el.profile_tier_level;
+      /* Should be main profile compatible */
+      if (ptl->profile_idc != GST_H265_PROFILE_IDC_MAIN
+          && ptl->profile_compatibility_flag[GST_H265_PROFILE_IDC_MAIN] == 0) {
+        has_alpha = FALSE;
+      }
+    }
+  }
+
+out:
+  if (config)
+    gst_h265_decoder_config_record_free (config);
+
+  gst_h265_parser_free (parser);
+  gst_buffer_unmap (codec_data, &map);
+
+  return has_alpha;
+}
+
+static gboolean
 gst_vtdec_set_format (GstVideoDecoder * decoder, GstVideoCodecState * state)
 {
   gboolean negotiate_now = TRUE;
@@ -884,12 +1013,19 @@ gst_vtdec_set_format (GstVideoDecoder * decoder, GstVideoCodecState * state)
   }
 
   if ((cm_format == kCMVideoCodecType_H264
-          || cm_format == kCMVideoCodecType_HEVC)
+          || cm_format == kCMVideoCodecType_HEVC
+          || cm_format == kCMVideoCodecType_HEVCWithAlpha)
       && state->codec_data == NULL) {
     GST_INFO_OBJECT (vtdec, "waiting for codec_data before negotiation");
     negotiate_now = FALSE;
   } else if (cm_format == kCMVideoCodecType_VP9) {
     negotiate_now = gst_vtdec_build_vp9_vpcc_from_caps (vtdec, state->caps);
+  }
+
+  if (cm_format == kCMVideoCodecType_HEVC
+      && gst_vtdec_hevc_codec_data_has_alpha (vtdec, state->codec_data)) {
+    GST_INFO_OBJECT (vtdec, "Detected HEVC+Alpha profile");
+    cm_format = kCMVideoCodecType_HEVCWithAlpha;
   }
 
   if (cm_format == kCMVideoCodecType_AV1 && vtdec->av1_needs_sequence_header) {
@@ -1403,7 +1539,8 @@ create_format_description_from_codec_data (GstVtdec * vtdec,
   atoms = CFDictionaryCreateMutable (NULL, 0, &kCFTypeDictionaryKeyCallBacks,
       &kCFTypeDictionaryValueCallBacks);
 
-  if (cm_format == kCMVideoCodecType_HEVC)
+  if (cm_format == kCMVideoCodecType_HEVC
+      || cm_format == kCMVideoCodecType_HEVCWithAlpha)
     gst_vtutil_dict_set_data (atoms, CFSTR ("hvcC"), map.data, map.size);
   else if (cm_format == kCMVideoCodecType_AV1) {
     GstBuffer *av1c = NULL;
@@ -1836,7 +1973,8 @@ gst_vtdec_compute_dpb_size (GstVtdec * vtdec,
             &vtdec->dbp_size)) {
       return FALSE;
     }
-  } else if (cm_format == kCMVideoCodecType_HEVC) {
+  } else if (cm_format == kCMVideoCodecType_HEVC
+      || cm_format == kCMVideoCodecType_HEVCWithAlpha) {
     if (!compute_hevc_decode_picture_buffer_size (vtdec, codec_data,
             &vtdec->dbp_size)) {
       return FALSE;
