@@ -172,6 +172,8 @@ gst_avf_video_source_device_type_get_type (void)
   GstPushSrc *pushSrc;
 
   gint deviceIndex;
+  gchar *uniqueId;
+  gchar *openedUniqueId;
   const gchar *deviceName;
   GstAVFVideoSourcePosition position;
   GstAVFVideoSourceOrientation orientation;
@@ -222,6 +224,8 @@ gst_avf_video_source_device_type_get_type (void)
 - (void)finalize;
 
 @property int deviceIndex;
+@property gchar *uniqueId;
+@property gchar *openedUniqueId;
 @property const gchar *deviceName;
 @property GstAVFVideoSourcePosition position;
 @property GstAVFVideoSourceOrientation orientation;
@@ -240,6 +244,7 @@ gst_avf_video_source_device_type_get_type (void)
 - (BOOL)openDeviceInput;
 - (BOOL)openDevice;
 - (void)closeDevice;
+- (void)clearOpenedUniqueId;
 - (GstVideoFormat)getGstVideoFormat:(NSNumber *)pixel_format;
 #if TARGET_OS_OSX
 - (CGDirectDisplayID)getDisplayIdFromDeviceIndex;
@@ -324,7 +329,7 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
 
 @implementation GstAVFVideoSrcImpl
 
-@synthesize deviceIndex, deviceName, position, orientation, deviceType, doStats,
+@synthesize deviceIndex, uniqueId, openedUniqueId, deviceName, position, orientation, deviceType, doStats,
     fps, captureScreen, captureScreenCursor, captureScreenMouseClicks, cropX, cropY, cropWidth, cropHeight;
 
 - (id)init
@@ -340,6 +345,8 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
     pushSrc = src;
 
     deviceIndex = DEFAULT_DEVICE_INDEX;
+    uniqueId = NULL;
+    openedUniqueId = NULL;
     deviceName = NULL;
     position = DEFAULT_POSITION;
     orientation = DEFAULT_ORIENTATION;
@@ -366,10 +373,17 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
 
 - (void)finalize
 {
+  g_clear_pointer (&uniqueId, g_free);
+  g_clear_pointer (&openedUniqueId, g_free);
   mainQueue = NULL;
   workerQueue = NULL;
 
   permissionCond = nil;
+}
+
+- (void)clearOpenedUniqueId
+{
+  g_clear_pointer (&openedUniqueId, g_free);
 }
 
 - (BOOL)openDeviceInput
@@ -423,7 +437,23 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
     }
   }
 
-  if (deviceIndex == DEFAULT_DEVICE_INDEX) {
+  if (uniqueId != NULL && *uniqueId != '\0') {
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    NSArray *devices = [AVCaptureDevice devicesWithMediaType:mediaType];
+G_GNUC_END_IGNORE_DEPRECATIONS
+    for (int i = 0; i < [devices count]; i++) {
+      AVCaptureDevice *candidate = [devices objectAtIndex:i];
+      if (g_strcmp0 ([[candidate uniqueID] UTF8String], uniqueId) == 0) {
+        device = candidate;
+        break;
+      }
+    }
+    if (device == nil) {
+      GST_ELEMENT_ERROR (element, RESOURCE, NOT_FOUND,
+          ("No video capture device found with unique ID '%s'", uniqueId), (NULL));
+      return NO;
+    }
+  } else if (deviceIndex == DEFAULT_DEVICE_INDEX) {
 #if TARGET_OS_IOS || TARGET_OS_TV
     // TODO: Also supported on macOS 10.15 and visionOS 2.1+
     if (deviceType != DEFAULT_DEVICE_TYPE && position != DEFAULT_POSITION) {
@@ -455,7 +485,15 @@ G_GNUC_END_IGNORE_DEPRECATIONS
   }
   g_assert (device != nil);
 
+  g_free (openedUniqueId);
+  openedUniqueId = g_strdup ([[device uniqueID] UTF8String]);
+
   deviceName = [[device localizedName] UTF8String];
+  GST_INFO ("Selected device name='%s' unique-id='%s' from selectors { device-index=%d, unique-id='%s' }",
+      GST_STR_NULL (deviceName),
+      GST_STR_NULL (openedUniqueId),
+      deviceIndex,
+      GST_STR_NULL (uniqueId));
   GST_INFO ("Opening '%s'", deviceName);
 
   input = [AVCaptureDeviceInput deviceInputWithDevice:device
@@ -593,6 +631,8 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     if (!captureScreen) {
       device = nil;
     }
+
+    g_clear_pointer (&openedUniqueId, g_free);
 
     if (caps)
       gst_caps_unref (caps);
@@ -1170,6 +1210,7 @@ enum
 {
   PROP_0,
   PROP_DEVICE_INDEX,
+  PROP_DEVICE_UNIQUE_ID,
   PROP_DEVICE_NAME,
   PROP_POSITION,
   PROP_ORIENTATION,
@@ -1257,11 +1298,29 @@ gst_avf_video_src_class_init (GstAVFVideoSrcClass * klass)
 
   gst_element_class_add_static_pad_template (gstelement_class, &src_template);
 
+  /**
+   * GstAVFVideoSrc:device-index:
+   *
+   * The zero-based device index.
+   *
+   * Deprecated: 1.30: Use "unique-id" instead.
+   */
   g_object_class_install_property (gobject_class, PROP_DEVICE_INDEX,
       g_param_spec_int ("device-index", "Device Index",
           "The zero-based device index",
           -1, G_MAXINT, DEFAULT_DEVICE_INDEX,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          G_PARAM_READWRITE | G_PARAM_DEPRECATED | G_PARAM_STATIC_STRINGS));
+  /**
+   * GstAVFVideoSrc:unique-id:
+   *
+   * Stable AVFoundation unique identifier of the device to open.
+   *
+   * Since: 1.30
+   */
+  g_object_class_install_property (gobject_class, PROP_DEVICE_UNIQUE_ID,
+      g_param_spec_string ("unique-id", "Unique ID",
+          "Stable AVFoundation unique identifier of the device to open",
+          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (gobject_class, PROP_DEVICE_NAME,
       g_param_spec_string ("device-name", "Device Name",
           "The name of the currently opened capture device",
@@ -1406,6 +1465,9 @@ gst_avf_video_src_get_property (GObject * object, guint prop_id, GValue * value,
     case PROP_DEVICE_INDEX:
       g_value_set_int (value, impl.deviceIndex);
       break;
+    case PROP_DEVICE_UNIQUE_ID:
+      g_value_set_string (value, impl.openedUniqueId ? : impl.uniqueId);
+      break;
     case PROP_DEVICE_NAME:
       g_value_set_string (value, impl.deviceName);
       break;
@@ -1464,6 +1526,12 @@ gst_avf_video_src_set_property (GObject * object, guint prop_id,
 #endif
     case PROP_DEVICE_INDEX:
       impl.deviceIndex = g_value_get_int (value);
+      [impl clearOpenedUniqueId];
+      break;
+    case PROP_DEVICE_UNIQUE_ID:
+      g_free (impl.uniqueId);
+      impl.uniqueId = g_value_dup_string (value);
+      [impl clearOpenedUniqueId];
       break;
     case PROP_POSITION:
       impl.position = g_value_get_enum(value);
