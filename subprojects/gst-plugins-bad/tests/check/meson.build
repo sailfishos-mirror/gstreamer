@@ -197,6 +197,12 @@ if ['darwin', 'ios'].contains(host_system)
     [['pipelines/vtdec-output-paths.c'],
         not videotoolbox_dep.found(), [videotoolbox_dep]],
   ]
+
+  if subsystem == 'macos'
+    basic_tests += [
+      [['elements/avfdeviceidentity.c']]
+    ]
+  endif
 endif
 
 # linux only tests
