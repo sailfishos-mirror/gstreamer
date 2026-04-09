@@ -117,7 +117,7 @@ enum
   PROP_THREADS,
 };
 
-#define VIDEO_CAPS GST_VIDEO_CAPS_MAKE ("{ RGB, RGBA, BGR, BGRA, GBR, ARGB, ABGR, RGBP, GBRP, BGRP }")
+#define VIDEO_CAPS GST_VIDEO_CAPS_MAKE ("{ RGB, RGBA, BGR, BGRA, GBR, ARGB, ABGR, RGBP, GBRP, BGRP, GRAY8 }")
 
 static GstStaticPadTemplate gst_tflite_inference_src_template =
 GST_STATIC_PAD_TEMPLATE ("src",
@@ -682,9 +682,22 @@ gst_tflite_inference_start (GstBaseTransform * trans)
       }
     }
 
-    if (data_type == GST_TENSOR_DATA_TYPE_UINT8 && gst_format && is_passthrough)
+    if (data_type == GST_TENSOR_DATA_TYPE_UINT8 && gst_format && is_passthrough) {
       gst_caps_set_simple (priv->model_incaps, "format", G_TYPE_STRING,
           gst_format, NULL);
+    } else if (priv->channels == 1) {
+      gst_caps_set_simple (priv->model_incaps, "format", G_TYPE_STRING,
+          "GRAY8", NULL);
+    } else if (priv->channels == 3) {
+      GstCaps *rgb_caps = gst_caps_from_string ("video/x-raw, format=(string)"
+          "{ RGB, RGBA, BGR, BGRA, GBR, ARGB, ABGR, RGBP, GBRP, BGRP }");
+      GstCaps *tmp = gst_caps_intersect (priv->model_incaps, rgb_caps);
+      gst_caps_unref (rgb_caps);
+      gst_caps_replace (&priv->model_incaps, tmp);
+      gst_caps_unref (tmp);
+    } else {
+      g_assert_not_reached ();
+    }
 
     gst_caps_set_simple (priv->model_incaps, "pixel-aspect-ratio",
         GST_TYPE_FRACTION, 1, 1, NULL);

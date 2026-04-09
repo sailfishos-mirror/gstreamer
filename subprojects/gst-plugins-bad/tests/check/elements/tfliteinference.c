@@ -63,6 +63,15 @@ fill_expected_chw_rgb_f32 (gfloat * out, gfloat r, gfloat g, gfloat b)
 }
 
 static void
+fill_expected_gray_f32 (gfloat * out, gsize n_values, gfloat value)
+{
+  gsize i;
+
+  for (i = 0; i < n_values; i++)
+    out[i] = value;
+}
+
+static void
 fill_expected_flat_rgb_u8 (guint8 * out, guint8 r, guint8 g, guint8 b)
 {
   gsize i;
@@ -386,6 +395,34 @@ build_expected_output_caps (const gchar * format, gint width, gint height,
   return caps;
 }
 
+/* Creates buffers with solid gray value 42. */
+
+static GstBuffer *
+create_solid_gray_buffer (GstVideoFormat format)
+{
+  GstVideoInfo info;
+  GstBuffer *buf;
+  GstMapInfo map;
+  guint y, x;
+
+  fail_unless (gst_video_info_set_format (&info, format, TEST_WIDTH,
+          TEST_HEIGHT));
+
+  fail_unless (GST_VIDEO_INFO_IS_GRAY (&info));
+
+  buf = gst_buffer_new_and_alloc (info.size);
+  fail_unless (gst_buffer_map (buf, &map, GST_MAP_WRITE));
+
+  for (y = 0; y < TEST_HEIGHT; y++) {
+    guint8 *row = map.data + info.stride[0] * y;
+    for (x = 0; x < TEST_WIDTH; x++)
+      row[x] = 42;
+  }
+
+  gst_buffer_unmap (buf, &map);
+  return buf;
+}
+
 /* Creates buffers with color R=11 G=22 B=33 A=55*/
 
 static GstBuffer *
@@ -398,6 +435,8 @@ create_solid_color_buffer (GstVideoFormat format)
 
   fail_unless (gst_video_info_set_format (&info, format, TEST_WIDTH,
           TEST_HEIGHT));
+
+  fail_unless (GST_VIDEO_INFO_IS_RGB (&info));
 
   buf = gst_buffer_new_and_alloc (info.size);
   fail_unless (gst_buffer_map (buf, &map, GST_MAP_WRITE));
@@ -528,12 +567,44 @@ GST_START_TEST (test_gbrp_caps_input)
   GstCaps *filter = gst_caps_new_simple ("video/x-raw",
       "format", G_TYPE_STRING, "GBRP", NULL);
   GstCaps *caps = gst_pad_query_caps (sinkpad, filter);
+  GstCaps *probe;
+  GstCaps *accept;
 
   fail_unless (caps != NULL);
   fail_if (gst_caps_is_empty (caps));
 
   gst_caps_unref (caps);
   gst_caps_unref (filter);
+
+  caps = gst_pad_query_caps (sinkpad, NULL);
+
+  fail_unless (caps != NULL);
+
+  probe = gst_caps_from_string ("video/x-raw, format=GBRP");
+  fail_unless (gst_caps_can_intersect (caps, probe),
+      "Expected sink caps to advertise GBRP");
+  gst_caps_unref (probe);
+
+  /* Non-passthrough 3-channel model must not advertise GRAY8 */
+  probe = gst_caps_from_string ("video/x-raw, format=GRAY8");
+  fail_if (gst_caps_can_intersect (caps, probe),
+      "Expected sink caps to NOT advertise GRAY8");
+  gst_caps_unref (probe);
+
+  gst_caps_unref (caps);
+
+  accept =
+      gst_caps_from_string ("video/x-raw,format=RGB,width=4,height=4,"
+      "framerate=30/1");
+  fail_unless (gst_pad_query_accept_caps (sinkpad, accept));
+  gst_caps_unref (accept);
+
+  accept =
+      gst_caps_from_string ("video/x-raw,format=GRAY8,width=4,height=4,"
+      "framerate=30/1");
+  fail_if (gst_pad_query_accept_caps (sinkpad, accept));
+  gst_caps_unref (accept);
+
   gst_object_unref (sinkpad);
   gst_harness_teardown (h);
   cleanup_temp_model (tmp_model);
@@ -632,6 +703,163 @@ GST_START_TEST (test_no_input_modelinfo)
   fail_unless_equals_int ((gint) tensor->num_dims, 2);
   fail_unless_equals_int ((gint) tensor->dims[0], 1);
   fail_unless_equals_int ((gint) tensor->dims[1], 48);
+
+  gst_buffer_unref (out);
+  gst_harness_teardown (h);
+  cleanup_temp_model (tmp_model);
+}
+
+GST_END_TEST;
+
+/* Test that a GRAY8 input is correctly converted to a float32 tensor, and that
+ *  the sink caps advertise GRAY8 and not any RGB format.
+ */
+GST_START_TEST (test_gray8_input_conversion)
+{
+  gchar *tmp_model = setup_model_with_ranges ("grayscale_4d.tflite", "0.0,1.0");
+  GstHarness *h = harness_new_with_model (tmp_model);
+  GstBuffer *in = create_solid_gray_buffer (GST_VIDEO_FORMAT_GRAY8);
+  GstBuffer *out;
+  GstTensorMeta *tmeta;
+  const GstTensor *tensor;
+  GstPad *sinkpad;
+  GstCaps *queried;
+  GstCaps *probe;
+  GstCaps *accept;
+  gfloat expected[TEST_NUM_PIXELS];
+  GstCaps *actual_caps, *expected_caps;
+  const TfliteTestTensorInfo out_tensors[] = {
+    {"output-0", "float32", "row-major", {1, 4, 4, 1}, 4}
+  };
+
+  gst_harness_set_src_caps_str (h,
+      "video/x-raw,format=GRAY8,width=4,height=4,framerate=30/1");
+
+  out = gst_harness_push_and_pull (h, in);
+  fail_unless (out);
+  fail_unless (gst_buffer_get_tensor_meta (out) != NULL);
+
+  tmeta = gst_buffer_get_tensor_meta (out);
+  fail_unless_equals_int (tmeta->num_tensors, 1);
+  tensor = gst_tensor_meta_get (tmeta, 0);
+  fail_unless (tensor != NULL);
+  fail_unless (gst_tensor_meta_get_by_id (tmeta,
+          g_quark_from_static_string ("output-0")) == tensor);
+  fail_unless_equals_int (tensor->id, g_quark_from_static_string ("output-0"));
+  fail_unless_equals_int (tensor->layout, GST_TENSOR_LAYOUT_CONTIGUOUS);
+  fail_unless_equals_int (tensor->data_type, GST_TENSOR_DATA_TYPE_FLOAT32);
+  fail_unless_equals_int (tensor->dims_order, GST_TENSOR_DIM_ORDER_ROW_MAJOR);
+  fail_unless_equals_int ((gint) tensor->num_dims, 4);
+  fail_unless_equals_int ((gint) tensor->dims[0], 1);
+  fail_unless_equals_int ((gint) tensor->dims[1], 4);
+  fail_unless_equals_int ((gint) tensor->dims[2], 4);
+  fail_unless_equals_int ((gint) tensor->dims[3], 1);
+
+  fill_expected_gray_f32 (expected, G_N_ELEMENTS (expected), 42.f);
+  TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
+      G_N_ELEMENTS (expected), 1e-6f);
+
+  actual_caps = pull_output_caps (h);
+  expected_caps =
+      build_expected_output_caps (gst_video_format_to_string
+      (GST_VIDEO_FORMAT_GRAY8), TEST_WIDTH, TEST_HEIGHT, 30, 1,
+      "grayscale_4d-group", out_tensors, G_N_ELEMENTS (out_tensors));
+  fail_unless (gst_caps_is_equal (actual_caps, expected_caps));
+  gst_caps_unref (actual_caps);
+  gst_caps_unref (expected_caps);
+
+  /* Non-passthrough 1-channel model must advertise GRAY8 and no RGB family */
+  sinkpad = gst_element_get_static_pad (h->element, "sink");
+  queried = gst_pad_query_caps (sinkpad, NULL);
+
+  probe = gst_caps_from_string ("video/x-raw, format=GRAY8");
+  fail_unless (gst_caps_can_intersect (queried, probe),
+      "Expected sink caps to advertise GRAY8");
+  gst_caps_unref (probe);
+
+  probe = gst_caps_from_string ("video/x-raw, format=RGB");
+  fail_if (gst_caps_can_intersect (queried, probe),
+      "Expected sink caps to NOT advertise any RGB format");
+  gst_caps_unref (probe);
+
+  gst_caps_unref (queried);
+
+  accept =
+      gst_caps_from_string ("video/x-raw,format=GRAY8,width=4,height=4,"
+      "framerate=30/1");
+  fail_unless (gst_pad_query_accept_caps (sinkpad, accept));
+  gst_caps_unref (accept);
+
+  accept =
+      gst_caps_from_string ("video/x-raw,format=RGB,width=4,height=4,"
+      "framerate=30/1");
+  fail_if (gst_pad_query_accept_caps (sinkpad, accept));
+  gst_caps_unref (accept);
+
+  gst_object_unref (sinkpad);
+  gst_buffer_unref (out);
+  gst_harness_teardown (h);
+  cleanup_temp_model (tmp_model);
+}
+
+GST_END_TEST;
+
+/* Test that a GRAY8 input to a passthrough model (where input and output are
+ * the same tensor) is correctly converted to a float32 tensor, and that the
+ * sink caps advertise GRAY8.
+ */
+GST_START_TEST (test_gray8_input_passthrough)
+{
+  gchar *tmp_model =
+      setup_model_with_ranges ("grayscale_uint8in_float32out.tflite",
+      "0.0,255.0");
+  GstHarness *h = harness_new_with_model (tmp_model);
+  GstBuffer *in = create_solid_gray_buffer (GST_VIDEO_FORMAT_GRAY8);
+  GstBuffer *out;
+  GstTensorMeta *tmeta;
+  const GstTensor *tensor;
+  gfloat expected[TEST_NUM_PIXELS];
+  GstCaps *actual_caps, *expected_caps;
+  const TfliteTestTensorInfo out_tensors[] = {
+    {"output-0", "float32", "row-major", {1, 4, 4, 1}, 4}
+  };
+
+  gst_harness_set_src_caps_str (h,
+      "video/x-raw,format=GRAY8,width=4,height=4,framerate=30/1");
+
+  out = gst_harness_push_and_pull (h, in);
+  fail_unless (out);
+  fail_unless (gst_buffer_get_tensor_meta (out) != NULL);
+
+  tmeta = gst_buffer_get_tensor_meta (out);
+  fail_unless_equals_int (tmeta->num_tensors, 1);
+  tensor = gst_tensor_meta_get (tmeta, 0);
+  fail_unless (tensor != NULL);
+  fail_unless (gst_tensor_meta_get_by_id (tmeta,
+          g_quark_from_static_string ("output-0")) == tensor);
+  fail_unless_equals_int (tensor->id, g_quark_from_static_string ("output-0"));
+  fail_unless_equals_int (tensor->layout, GST_TENSOR_LAYOUT_CONTIGUOUS);
+  fail_unless_equals_int (tensor->data_type, GST_TENSOR_DATA_TYPE_FLOAT32);
+  fail_unless_equals_int (tensor->dims_order, GST_TENSOR_DIM_ORDER_ROW_MAJOR);
+  fail_unless_equals_int ((gint) tensor->num_dims, 4);
+  fail_unless_equals_int ((gint) tensor->dims[0], 1);
+  fail_unless_equals_int ((gint) tensor->dims[1], 4);
+  fail_unless_equals_int ((gint) tensor->dims[2], 4);
+  fail_unless_equals_int ((gint) tensor->dims[3], 1);
+
+  fill_expected_gray_f32 (expected, G_N_ELEMENTS (expected), 42.f);
+  TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
+      G_N_ELEMENTS (expected), 1e-6f);
+
+  actual_caps = pull_output_caps (h);
+  expected_caps =
+      build_expected_output_caps (gst_video_format_to_string
+      (GST_VIDEO_FORMAT_GRAY8), TEST_WIDTH, TEST_HEIGHT, 30, 1,
+      "grayscale_uint8in_float32out-group", out_tensors,
+      G_N_ELEMENTS (out_tensors));
+  fail_unless (gst_caps_is_equal (actual_caps, expected_caps));
+  gst_caps_unref (actual_caps);
+  gst_caps_unref (expected_caps);
 
   gst_buffer_unref (out);
   gst_harness_teardown (h);
@@ -1016,6 +1244,7 @@ GST_START_TEST (test_transform_caps_and_accept_caps)
   GstPad *sinkpad = gst_element_get_static_pad (h->element, "sink");
   GstCaps *filter = gst_caps_from_string ("video/x-raw,format=RGB");
   GstCaps *caps = gst_pad_query_caps (sinkpad, filter);
+  GstCaps *probe;
 
   fail_unless (caps != NULL);
   fail_if (gst_caps_is_empty (caps));
@@ -1033,6 +1262,32 @@ GST_START_TEST (test_transform_caps_and_accept_caps)
       gst_caps_from_string
       ("video/x-raw,format=I420,width=4,height=4,framerate=30/1");
   fail_if (gst_pad_query_accept_caps (sinkpad, caps));
+  gst_caps_unref (caps);
+
+  /* Passthrough uint8 model exposes only the exact guessed format (RGB), not
+   * the full RGB family — so RGBA and GRAY8 must be rejected. */
+  caps =
+      gst_caps_from_string
+      ("video/x-raw,format=RGBA,width=4,height=4,framerate=30/1");
+  fail_if (gst_pad_query_accept_caps (sinkpad, caps));
+  gst_caps_unref (caps);
+
+  caps =
+      gst_caps_from_string
+      ("video/x-raw,format=GRAY8,width=4,height=4,framerate=30/1");
+  fail_if (gst_pad_query_accept_caps (sinkpad, caps));
+  gst_caps_unref (caps);
+
+  caps = gst_pad_query_caps (sinkpad, NULL);
+  probe = gst_caps_from_string ("video/x-raw, format=RGBA");
+  fail_if (gst_caps_can_intersect (caps, probe),
+      "Passthrough model must not advertise RGBA in caps");
+  gst_caps_unref (probe);
+
+  probe = gst_caps_from_string ("video/x-raw, format=GRAY8");
+  fail_if (gst_caps_can_intersect (caps, probe),
+      "Passthrough RGB model must not advertise GRAY8 in caps");
+  gst_caps_unref (probe);
   gst_caps_unref (caps);
 
   gst_object_unref (sinkpad);
@@ -1296,6 +1551,8 @@ tfliteinference_suite (void)
   tcase_add_test (tc, test_input_formats);
   tcase_add_test (tc, test_gbrp_caps_input);
   tcase_add_test (tc, test_planar_uint8_input_passthrough);
+  tcase_add_test (tc, test_gray8_input_conversion);
+  tcase_add_test (tc, test_gray8_input_passthrough);
   tcase_add_test (tc, test_normalization_variants);
   tcase_add_test (tc, test_output_dtypes);
   tcase_add_test (tc, test_dynamic_dims);

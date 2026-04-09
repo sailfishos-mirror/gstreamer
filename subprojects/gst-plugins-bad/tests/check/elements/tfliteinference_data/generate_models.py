@@ -189,6 +189,11 @@ def main():
     p = convert_keras(keras.Model(inp, out), "grayscale_4d.tflite")
     write_modelinfo(p)
 
+    inp = keras.Input(shape=(4, 4, 1), batch_size=1, dtype="uint8", name="input_gray4d_u8")
+    out = layers.Lambda(lambda t: ops.cast(t, "float32"), name="output_gray4d_f32")(inp)
+    p = convert_keras(keras.Model(inp, out), "grayscale_uint8in_float32out.tflite")
+    write_modelinfo(p)
+
     with open(os.path.join(BASE_DIR, "corrupt_model.tflite"), "wb") as f:
         f.write(b"not-a-valid-tflite-model")
 
