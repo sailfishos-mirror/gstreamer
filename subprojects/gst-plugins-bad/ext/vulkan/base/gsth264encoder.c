@@ -349,7 +349,8 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
 
   /* If not set, generate a idr every second */
   if (priv->gop.params.idr_period == 0) {
-    priv->gop.params.idr_period = (priv->fps_n + priv->fps_d - 1) / priv->fps_d;
+    priv->gop.params.idr_period =
+        ((guint64) priv->fps_n + (guint64) priv->fps_d - 1) / priv->fps_d;
   }
 
   /* Prefer have more than 1 reference for the GOP which is not very small. */
@@ -433,8 +434,11 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
   }
 
   /* How many possible refs within a GOP. */
-  gop_ref_num = (priv->gop.params.idr_period + priv->gop.params.num_bframes) /
-      (priv->gop.params.num_bframes + 1);
+  {
+    guint64 sum = (guint64) priv->gop.params.idr_period +
+        (guint64) priv->gop.params.num_bframes;
+    gop_ref_num = sum / (priv->gop.params.num_bframes + 1);
+  }
 
   /* The end reference. */
   if (priv->gop.params.num_bframes > 0
@@ -3040,11 +3044,11 @@ gst_h264_calculate_coded_size (const GstH264SPS * sps, guint num_slices)
      * RawMbBits = 256 * BitDepthY + 2 * MbWidthC * MbHeightC * BitDepthC */
     RawMbBits =
         256 * bit_depth_luma + 2 * MbWidthC * MbHeightC * bit_depth_chroma;
-    codedbuf_size = (mb_width * mb_height) * (128 + RawMbBits) / 8;
+    codedbuf_size = ((guint64) mb_width * mb_height) * (128 + RawMbBits) / 8;
   } else {
     /* The number of bits of macroblock_layer( ) data for any macroblock
      * is not greater than 3200 */
-    codedbuf_size = (mb_width * mb_height) * (3200 / 8);
+    codedbuf_size = ((guint64) mb_width * mb_height) * (3200 / 8);
   }
 
   /* Account for SPS header */
@@ -3058,7 +3062,7 @@ gst_h264_calculate_coded_size (const GstH264SPS * sps, guint num_slices)
   codedbuf_size += 4 + GST_ROUND_UP_8 (GST_H264_MAX_PPS_HDR_SIZE) / 8;
 
   /* Account for slice header */
-  codedbuf_size += num_slices
+  codedbuf_size += (guint64) num_slices
       * (4 + GST_ROUND_UP_8 (GST_H264_MAX_SLICE_HDR_SIZE) / 8);
 
   /* Add ceil 5% for safety */
