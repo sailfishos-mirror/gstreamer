@@ -32,9 +32,15 @@
  * subclass is expected to implement the rate control algorithms and the
  * specific accelerator logic.
  *
+ * Limitations:
  * + Extended profile isn't supported.
  * + Only progressive frames are supported (not interlaced)
- * * Neither intra profiles are fully supported
+ * + Intra profiles are not fully supported
+ * + Multi-slice encoding is not yet implemented
+ * + Scaling lists, MVC and SVC extensions are not supported
+ * + Timing information (HRD/VUI) is not fully implemented
+ *
+ * Since: 1.30
  */
 
 /* ToDo:
