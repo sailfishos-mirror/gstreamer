@@ -52,6 +52,7 @@ struct _GstAVFDeviceProvider {
 typedef enum {
   GST_AVF_DEVICE_TYPE_INVALID = 0,
   GST_AVF_DEVICE_TYPE_VIDEO_SOURCE,
+  GST_AVF_DEVICE_TYPE_SCREEN_SOURCE,
 } GstAvfDeviceType;
 
 struct _GstAVFDeviceProviderClass {
@@ -78,7 +79,6 @@ struct _GstAvfDevice {
   GstDevice         parent;
 
   GstAvfDeviceType  type;
-  int               device_index;
   gchar            *unique_id;
   const gchar      *element;
 };

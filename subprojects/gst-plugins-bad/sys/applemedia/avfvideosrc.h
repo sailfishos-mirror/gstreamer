@@ -20,7 +20,11 @@
 #ifndef __GST_AVF_VIDEO_SRC_H__
 #define __GST_AVF_VIDEO_SRC_H__
 
+#include <TargetConditionals.h>
 #import <AVFoundation/AVFoundation.h>
+#if TARGET_OS_OSX
+@class NSScreen;
+#endif
 #include <gst/base/base.h>
 
 G_BEGIN_DECLS
@@ -88,6 +92,15 @@ void gst_avf_video_src_debug_init (void);
 GstCaps* gst_av_capture_device_get_caps (AVCaptureDevice *device,
                                          AVCaptureVideoDataOutput *output,
                                          GstAVFVideoSourceOrientation orientation);
+#if TARGET_OS_OSX
+CGDirectDisplayID gst_avf_screen_get_display_id (NSScreen * screen);
+gchar * gst_avf_screen_dup_unique_id (CGDirectDisplayID display_id);
+gchar * gst_avf_screen_dup_name (NSScreen * screen,
+                                 CGDirectDisplayID display_id);
+GstCaps* gst_av_capture_screen_get_caps (CGDirectDisplayID display_id,
+                                         gdouble scale,
+                                         AVCaptureVideoDataOutput *output);
+#endif
 
 G_END_DECLS
 
