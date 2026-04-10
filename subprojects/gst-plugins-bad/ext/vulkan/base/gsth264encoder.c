@@ -331,21 +331,10 @@ gst_h264_encoder_frame_set_user_data (GstH264EncoderFrame * frame,
  * Returns: (transfer none): The previously set user_data
  */
 
-/*
- * TODO:
- * + Load some preset fixed GOP structure.
- * + Skip this if in lookahead mode.
- */
-static gboolean
-gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
+static inline void
+ensure_and_adjust_gop_parameters (GstH264Encoder * self)
 {
   GstH264EncoderPrivate *priv = _GET_PRIV (self);
-  guint32 list0, list1, gop_ref_num;
-  gint32 p_frames;
-  gboolean ret;
-
-  if (priv->stream.profile == GST_H264_PROFILE_BASELINE)
-    priv->gop.params.num_bframes = 0;
 
   /* If not set, generate a idr every second */
   if (priv->gop.params.idr_period == 0) {
@@ -372,11 +361,23 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
           priv->gop.params.num_bframes);
     }
   }
+}
 
-  list0 = MIN (priv->config.max_num_reference_list0, priv->gop.num_ref_frames);
-  list1 = MIN (priv->config.max_num_reference_list1, priv->gop.num_ref_frames);
+enum GOPConfigResult {
+  GOPConfigResultIntraOnly,
+  GOPConfigResultClosed,
+};
 
-  if (list0 == 0) {
+static inline enum GOPConfigResult
+configure_reference_counts (GstH264Encoder * self,
+    guint32 * list0, guint32 * list1)
+{
+  GstH264EncoderPrivate *priv = _GET_PRIV (self);
+
+  *list0 = MIN (priv->config.max_num_reference_list0, priv->gop.num_ref_frames);
+  *list1 = MIN (priv->config.max_num_reference_list1, priv->gop.num_ref_frames);
+
+  if (*list0 == 0) {
     GST_INFO_OBJECT (self,
         "No reference support, fallback to intra only stream");
 
@@ -390,14 +391,14 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
     priv->gop.params.num_iframes = priv->gop.params.idr_period - 1; /* The idr */
     priv->gop.ref_num_list0 = 0;
     priv->gop.ref_num_list1 = 0;
-    goto create_poc;
+    return GOPConfigResultIntraOnly;
   }
 
   if (priv->gop.num_ref_frames <= 1) {
     GST_INFO_OBJECT (self, "The number of reference frames is only %d,"
         " no B frame allowed, fallback to I/P mode", priv->gop.num_ref_frames);
     priv->gop.params.num_bframes = 0;
-    list1 = 0;
+    *list1 = 0;
   }
 
   /* b_pyramid needs at least 1 ref for B, besides the I/P */
@@ -407,7 +408,7 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
     priv->gop.params.b_pyramid = FALSE;
   }
 
-  if (list1 == 0 && priv->gop.params.num_bframes > 0) {
+  if (*list1 == 0 && priv->gop.params.num_bframes > 0) {
     GST_INFO_OBJECT (self,
         "No max reference count for list 1, fallback to I/P mode");
     priv->gop.params.num_bframes = 0;
@@ -416,7 +417,7 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
 
   /* I/P mode, no list1 needed. */
   if (priv->gop.params.num_bframes == 0)
-    list1 = 0;
+    *list1 = 0;
 
   /* Not enough B frame, no need for b_pyramid. */
   if (priv->gop.params.num_bframes <= 1)
@@ -424,27 +425,44 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
 
   /* b pyramid has only one backward reference. */
   if (priv->gop.params.b_pyramid)
-    list1 = 1;
+    *list1 = 1;
 
-  if (priv->gop.num_ref_frames > list0 + list1) {
-    priv->gop.num_ref_frames = list0 + list1;
+  if (priv->gop.num_ref_frames > *list0 + *list1) {
+    priv->gop.num_ref_frames = *list0 + *list1;
     GST_WARNING_OBJECT (self, "number of reference frames is bigger than max "
         "reference count. Lowered number of reference frames to %d",
         priv->gop.num_ref_frames);
   }
 
+  return GOPConfigResultClosed;
+}
+
+static inline guint32
+calculate_gop_ref_num (GstH264Encoder * self)
+{
+  GstH264EncoderPrivate *priv = _GET_PRIV (self);
+  guint32 bframes_plus1, total_frames, gop_ref_num;
+
+  bframes_plus1 = priv->gop.params.num_bframes + 1;
+  total_frames = priv->gop.params.idr_period + priv->gop.params.num_bframes;
+
   /* How many possible refs within a GOP. */
-  {
-    guint64 sum = (guint64) priv->gop.params.idr_period +
-        (guint64) priv->gop.params.num_bframes;
-    gop_ref_num = sum / (priv->gop.params.num_bframes + 1);
-  }
+  gop_ref_num = total_frames / bframes_plus1;
 
   /* The end reference. */
   if (priv->gop.params.num_bframes > 0
       /* frame_num % (priv->gop.num_bframes + 1) happens to be the end P */
-      && (priv->gop.params.idr_period % (priv->gop.params.num_bframes + 1) != 1))
+      && (priv->gop.params.idr_period % bframes_plus1 != 1))
     gop_ref_num++;
+
+  return gop_ref_num;
+}
+
+static inline void
+adjust_reference_distribution (GstH264Encoder * self,
+    guint32 list0, guint32 list1, guint32 gop_ref_num)
+{
+  GstH264EncoderPrivate *priv = _GET_PRIV (self);
 
   /* Adjust reference num based on B frames and B pyramid. */
   if (priv->gop.params.num_bframes == 0) {
@@ -492,30 +510,55 @@ gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
     if (priv->gop.ref_num_list0 > list0)
       priv->gop.ref_num_list0 = list0;
   }
+}
 
-  /* It's OK, keep slots for GST_VIDEO_CODEC_FRAME_IS_FORCE_KEYFRAME frame. */
-  if (priv->gop.ref_num_list0 > gop_ref_num) {
-    GST_DEBUG_OBJECT (self, "num_ref_frames %d is bigger than gop_ref_num %d",
-        priv->gop.ref_num_list0, gop_ref_num);
+/*
+ * TODO:
+ * + Load some preset fixed GOP structure.
+ * + Skip this if in lookahead mode.
+ */
+static gboolean
+gst_h264_encoder_generate_gop_structure (GstH264Encoder * self)
+{
+  GstH264EncoderPrivate *priv = _GET_PRIV (self);
+  guint32 list0, list1, gop_ref_num;
+  gint32 p_frames;
+  gboolean ret;
+
+  if (priv->stream.profile == GST_H264_PROFILE_BASELINE)
+    priv->gop.params.num_bframes = 0;
+
+  ensure_and_adjust_gop_parameters (self);
+
+  if (configure_reference_counts (self, &list0, &list1)
+      == GOPConfigResultClosed) {
+    gop_ref_num = calculate_gop_ref_num (self);
+
+    adjust_reference_distribution (self, list0, list1, gop_ref_num);
+
+    /* It's OK, keep slots for GST_VIDEO_CODEC_FRAME_IS_FORCE_KEYFRAME frame. */
+    if (priv->gop.ref_num_list0 > gop_ref_num) {
+      GST_DEBUG_OBJECT (self, "num_ref_frames %d is bigger than gop_ref_num %d",
+          priv->gop.ref_num_list0, gop_ref_num);
+    }
+
+    /* Include the reference picture itself. */
+    priv->gop.params.ip_period = 1 + priv->gop.params.num_bframes;
+
+    p_frames = MAX (gop_ref_num - 1 /* IDR */, 0);
+    if (priv->gop.params.num_iframes > p_frames) {
+      priv->gop.params.num_iframes = p_frames;
+      GST_INFO_OBJECT (self, "Too many I frames insertion, lowering it to %d",
+          priv->gop.params.num_iframes);
+    }
+
+    if (priv->gop.params.num_iframes > 0) {
+      guint total_i_frames = priv->gop.params.num_iframes + 1; /* IDR */
+      priv->gop.params.i_period =
+          (gop_ref_num / total_i_frames) * (priv->gop.params.num_bframes + 1);
+    }
   }
 
-  /* Include the reference picture itself. */
-  priv->gop.params.ip_period = 1 + priv->gop.params.num_bframes;
-
-  p_frames = MAX (gop_ref_num - 1 /* IDR */, 0);
-  if (priv->gop.params.num_iframes > p_frames) {
-    priv->gop.params.num_iframes = p_frames;
-    GST_INFO_OBJECT (self, "Too many I frames insertion, lowering it to %d",
-        priv->gop.params.num_iframes);
-  }
-
-  if (priv->gop.params.num_iframes > 0) {
-    guint total_i_frames = priv->gop.params.num_iframes + 1; /* IDR */
-    priv->gop.params.i_period =
-        (gop_ref_num / total_i_frames) * (priv->gop.params.num_bframes + 1);
-  }
-
-create_poc:
   /* initialize max_frame_num and max_poc. */
   priv->gop.log2_max_frame_num = 4;
   while ((1 << priv->gop.log2_max_frame_num) <= priv->gop.params.idr_period)
