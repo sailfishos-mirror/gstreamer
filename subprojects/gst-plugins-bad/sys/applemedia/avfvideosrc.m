@@ -1155,9 +1155,16 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
   if (!ret)
     return ret;
 
+  useVideoMeta =
+      gst_query_find_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
+
   gst_query_parse_allocation (query, &alloc_caps, NULL);
+  if (alloc_caps == NULL)
+    return TRUE;
+
   features = gst_caps_get_features (alloc_caps, 0);
-  if (gst_caps_features_contains (features, GST_CAPS_FEATURE_MEMORY_GL_MEMORY)) {
+  if (features && gst_caps_features_contains (features,
+          GST_CAPS_FEATURE_MEMORY_GL_MEMORY)) {
     GstVideoTextureCacheGL *cache_gl;
 
     cache_gl = textureCache ? GST_VIDEO_TEXTURE_CACHE_GL (textureCache) : NULL;
