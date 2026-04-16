@@ -119,6 +119,7 @@ static void gst_avf_asset_src_read_audio (GstAVFAssetSrc *self);
 static void gst_avf_asset_src_read_video (GstAVFAssetSrc *self);
 static void gst_avf_asset_src_start (GstAVFAssetSrc *self);
 static void gst_avf_asset_src_stop (GstAVFAssetSrc *self);
+static void gst_avf_asset_src_update_video_allocation (GstAVFAssetSrc * self);
 static gboolean gst_avf_asset_src_start_reading (GstAVFAssetSrc *self);
 static void gst_avf_asset_src_stop_reading (GstAVFAssetSrc *self);
 static void gst_avf_asset_src_stop_all (GstAVFAssetSrc *self);
@@ -155,7 +156,7 @@ gst_avf_asset_src_register_supplemental_decoders_if_needed (NSArray * tracks)
         (unsigned long)[format_descriptions count]);
 
     for (guint j = 0; j < [format_descriptions count]; j++) {
-      CMFormatDescriptionRef fmt = 
+      CMFormatDescriptionRef fmt =
           (__bridge CMFormatDescriptionRef) [format_descriptions objectAtIndex:j];
       FourCharCode codec = CMFormatDescriptionGetMediaSubType (fmt);
 
@@ -247,6 +248,7 @@ gst_avf_asset_src_init (GstAVFAssetSrc * self)
   self->selected_video_track = 0;
   self->last_audio_pad_ret = GST_FLOW_OK;
   self->last_video_pad_ret = GST_FLOW_OK;
+  self->use_video_meta = FALSE;
   g_mutex_init (&self->lock);
 }
 
@@ -338,6 +340,7 @@ gst_avf_asset_src_change_state (GstElement * element, GstStateChange transition)
         gst_avf_asset_src_stop_all (self);
         return GST_STATE_CHANGE_FAILURE;
       }
+      [GST_AVF_ASSET_SRC_READER (self) setUseVideoMeta: self->use_video_meta];
       break;
     }
     case GST_STATE_CHANGE_READY_TO_PAUSED:
@@ -635,6 +638,9 @@ gst_avf_asset_src_read_audio (GstAVFAssetSrc *self)
 static void
 gst_avf_asset_src_read_video (GstAVFAssetSrc *self)
 {
+  if (gst_pad_check_reconfigure (self->videopad))
+    gst_avf_asset_src_update_video_allocation (self);
+
   gst_avf_asset_src_read_data (self, self->videopad,
       GST_AVF_ASSET_READER_MEDIA_TYPE_VIDEO);
 }
@@ -776,6 +782,34 @@ gst_avf_asset_src_start (GstAVFAssetSrc *self)
 }
 
 static void
+gst_avf_asset_src_update_video_allocation (GstAVFAssetSrc * self)
+{
+  GstCaps *caps;
+  GstQuery *query;
+
+  if (!self->videopad)
+    return;
+
+  caps = [GST_AVF_ASSET_SRC_READER (self) videoCaps];
+  if (!caps)
+    return;
+
+  query = gst_query_new_allocation (caps, TRUE);
+  if (!gst_pad_peer_query (self->videopad, query)) {
+    GST_DEBUG_OBJECT (self, "peer ALLOCATION query failed");
+  }
+
+  self->use_video_meta =
+      gst_query_find_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
+  if (self->reader != NULL) {
+    [GST_AVF_ASSET_SRC_READER (self) setUseVideoMeta: self->use_video_meta];
+  }
+
+  gst_query_unref (query);
+  gst_caps_unref (caps);
+}
+
+static void
 gst_avf_asset_src_stop (GstAVFAssetSrc *self)
 {
   gboolean has_audio, has_video;
@@ -812,6 +846,9 @@ gst_avf_asset_src_start_reading (GstAVFAssetSrc *self)
   }
 
   GST_DEBUG_OBJECT (self, "Start reading");
+
+  if (AVF_ASSET_READER_HAS_VIDEO (self))
+    gst_avf_asset_src_update_video_allocation (self);
 
   if ((ret = gst_avf_asset_src_start_reader (self)) != TRUE) {
     goto exit;
@@ -1156,6 +1193,11 @@ gst_avf_asset_src_uri_handler_init (gpointer g_iface, gpointer iface_data)
   reading = TRUE;
 }
 
+- (void) setUseVideoMeta: (gboolean) useVideoMeta
+{
+  use_video_meta = useVideoMeta;
+}
+
 - (void) stop
 {
   [reader cancelReading];
@@ -1241,7 +1283,9 @@ gst_avf_asset_src_uri_handler_init (gpointer g_iface, gpointer iface_data)
     GST_WARNING ("Buffer %p has invalid timestamp", cmbuf);
   }
   dur = CMSampleBufferGetDuration (cmbuf);
-  buf = gst_core_media_buffer_new (cmbuf, FALSE, NULL);
+  buf = gst_core_media_buffer_new (cmbuf,
+      type == GST_AVF_ASSET_READER_MEDIA_TYPE_VIDEO ? use_video_meta :
+      FALSE, NULL);
   CFRelease (cmbuf);
   if (buf == NULL)
     return NULL;
@@ -1291,6 +1335,11 @@ gst_avf_asset_src_uri_handler_init (gpointer g_iface, gpointer iface_data)
   }
 
   return caps;
+}
+
+- (GstCaps *) videoCaps
+{
+  return video_caps ? gst_caps_ref (video_caps) : NULL;
 }
 
 - (void) dealloc
