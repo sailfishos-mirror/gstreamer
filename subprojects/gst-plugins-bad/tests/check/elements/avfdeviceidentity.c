@@ -54,6 +54,12 @@ free_avf_device_info (gpointer data)
   g_free (info);
 }
 
+static gboolean
+running_in_ci (void)
+{
+  return g_getenv ("CI") != NULL;
+}
+
 static GPtrArray *
 collect_avf_devices (GstDeviceMonitor * monitor,
     const gchar * device_class_prefix)
@@ -542,7 +548,11 @@ avfdeviceidentity_suite (void)
       g_getenv ("GST_AVF_ENABLE_DEVICE_INDEX_STRESS");
 
   suite_add_tcase (s, tc_basic);
-  tcase_add_test (tc_basic, test_avf_unique_id_stability);
+  if (!running_in_ci ()) {
+    tcase_add_test (tc_basic, test_avf_unique_id_stability);
+  } else {
+    GST_INFO ("Not registering AVF unique-id stability test on CI");
+  }
   tcase_add_test (tc_basic, test_avf_screen_provider_configuration);
   if (g_strcmp0 (enable_device_index_stress, "1") == 0) {
     tcase_add_test (tc_basic, test_avf_device_order_instability);

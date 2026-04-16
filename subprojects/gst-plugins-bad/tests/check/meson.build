@@ -190,7 +190,9 @@ endif
 
 if host_system == 'darwin'
   videotoolbox_dep = dependency('VideoToolbox')
+  avfoundation_test_dep = dependency('appleframeworks', modules : ['Foundation', 'AVFoundation'])
   base_tests += [
+    [['elements/avfsources-videometa.c'], false, [avfoundation_test_dep]],
     [['pipelines/avfassetsrc-supplemental.c'], false, [videotoolbox_dep]],
     [['pipelines/avfassetsrc-partial.c']],
     [['pipelines/vtdec-output-paths.c']],
