@@ -190,6 +190,8 @@ gst_core_video_wrap_pixel_buffer (GstBuffer * buf,
   } else {
     n_planes = 1;
     stride[0] = CVPixelBufferGetBytesPerRow (pixel_buf);
+    if (stride[0] != GST_VIDEO_INFO_PLANE_STRIDE (info, 0) && has_padding)
+      *has_padding = TRUE;
     offset[0] = 0;
     size = stride[0] * CVPixelBufferGetHeight (pixel_buf);
 
