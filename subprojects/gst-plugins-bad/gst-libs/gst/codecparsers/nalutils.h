@@ -114,6 +114,13 @@ gboolean nal_reader_get_se (NalReader * nr, gint32 * val);
     goto error; \
   } \
 }
+#define WARN_ALLOWED_MAX_WITH_DEBUG(dbg, val, max) { \
+  if (val > max) { \
+    GST_WARNING_ONCE ("value for '" dbg "' greater than max. value: %d, max %d", \
+                     val, max); \
+    goto warning; \
+  } \
+}
 #define CHECK_ALLOWED_MAX(val, max) \
   CHECK_ALLOWED_MAX_WITH_DEBUG (G_STRINGIFY (val), val, max)
 
@@ -173,6 +180,13 @@ gboolean nal_reader_get_se (NalReader * nr, gint32 * val);
   guint32 tmp; \
   READ_UE (nr, tmp); \
   CHECK_ALLOWED_MAX_WITH_DEBUG (G_STRINGIFY (val), tmp, max); \
+  val = tmp; \
+}
+
+#define WARN_UE_MAX(nr, val, max) { \
+  guint32 tmp; \
+  READ_UE (nr, tmp); \
+  WARN_ALLOWED_MAX_WITH_DEBUG (G_STRINGIFY (val), tmp, max); \
   val = tmp; \
 }
 

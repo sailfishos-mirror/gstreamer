@@ -502,13 +502,25 @@ gst_h264_parse_vui_parameters (GstH264SPS * sps, NalReader * nr)
   if (vui->bitstream_restriction_flag) {
     READ_UINT8 (nr, vui->motion_vectors_over_pic_boundaries_flag, 1);
     READ_UE (nr, vui->max_bytes_per_pic_denom);
-    READ_UE_MAX (nr, vui->max_bits_per_mb_denom, 16);
-    READ_UE_MAX (nr, vui->log2_max_mv_length_horizontal, 16);
-    READ_UE_MAX (nr, vui->log2_max_mv_length_vertical, 16);
+    WARN_UE_MAX (nr, vui->max_bits_per_mb_denom, 16);
+    WARN_UE_MAX (nr, vui->log2_max_mv_length_horizontal, 16);
+    WARN_UE_MAX (nr, vui->log2_max_mv_length_vertical, 16);
     READ_UE (nr, vui->num_reorder_frames);
     READ_UE (nr, vui->max_dec_frame_buffering);
   }
 
+  return TRUE;
+
+warning:
+  GST_WARNING_ONCE ("Error detected, clearing bitstream restriction flag");
+  vui->bitstream_restriction_flag = 0;
+  vui->motion_vectors_over_pic_boundaries_flag = 0;
+  vui->max_bytes_per_pic_denom = 0;
+  vui->max_bits_per_mb_denom = 0;
+  vui->log2_max_mv_length_horizontal = 0;
+  vui->log2_max_mv_length_vertical = 0;
+  vui->num_reorder_frames = 0;
+  vui->max_dec_frame_buffering = 0;
   return TRUE;
 
 error:
