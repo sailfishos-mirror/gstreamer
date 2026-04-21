@@ -56,6 +56,7 @@ base_tests = [
   [['elements/interlace.c'], get_option('interlace').disabled()],
   [['elements/ioutracker.c'], get_option('tensordecoders').disabled(), gstanalytics_dep],
   [['elements/tfliteinference.c', 'elements/inference-utils.c'], not tensorflow_lite_dep.found() or not tensorflow_lite_header_found],
+  [['elements/onnxinference.c', 'elements/inference-utils.c'], not onnxrt_dep.found()],
   [['elements/jpeg2000parse.c'], false, [libparser_dep, gstcodecparsers_dep]],
   [['elements/line21.c'], get_option('closedcaption').disabled()],
   [['elements/mfvideosrc.c'], host_machine.system() != 'windows', ],
@@ -215,6 +216,7 @@ test_defines = [
   '-DTEST_PATH="' + fsmod.as_posix(meson.current_build_dir()) + '/media"',
   '-DDASH_MPD_DATADIR=' + fsmod.as_posix(meson.current_source_dir()) + '/elements/dash_mpd_data',
   '-DGST_TFLITE_TEST_DATA_PATH="' + fsmod.as_posix(meson.current_source_dir()) + '/elements/tfliteinference_data"',
+  '-DGST_ONNX_TEST_DATA_PATH="' + fsmod.as_posix(meson.current_source_dir()) + '/elements/onnxinference_data"',
   '-DGST_USE_UNSTABLE_API',
 ]
 

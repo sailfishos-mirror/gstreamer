@@ -43,6 +43,7 @@ name (ctype * out, gsize n_pixels, ctype r, ctype g, ctype b) \
 
 DEFINE_FILL_EXPECTED_FLAT_RGB_FUNC (fill_expected_flat_rgb_u8, guint8);
 DEFINE_FILL_EXPECTED_FLAT_RGB_FUNC (fill_expected_flat_rgb_i8, gint8);
+DEFINE_FILL_EXPECTED_FLAT_RGB_FUNC (fill_expected_flat_rgb_i32, gint32);
 DEFINE_FILL_EXPECTED_FLAT_RGB_FUNC (fill_expected_flat_rgb_f32, gfloat);
 
 void

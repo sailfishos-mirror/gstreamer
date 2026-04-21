@@ -32,6 +32,9 @@ void fill_expected_flat_rgb_u8 (guint8 * out, gsize n_pixels,
 void fill_expected_flat_rgb_i8 (gint8 * out, gsize n_pixels,
     gint8 r, gint8 g, gint8 b);
 
+void fill_expected_flat_rgb_i32 (gint32 * out, gsize n_pixels,
+    gint32 r, gint32 g, gint32 b);
+
 void fill_expected_flat_rgb_f32 (gfloat * out, gsize n_pixels,
     gfloat r, gfloat g, gfloat b);
 
