@@ -4286,12 +4286,12 @@ set_manager_buffer_mode (GstRTSPSrc * src)
 }
 
 static void
-update_srtcp_params (GstRTSPStream * stream)
+update_srtcp_params (GstRTSPStream * stream, gboolean update)
 {
   GstStructure *s = gst_caps_get_structure (stream->srtcpparams, 0);
   if (s) {
     GstBuffer *buf;
-    GstBuffer *mki_buf;
+    GstBuffer *mki_buf = NULL;
     const gchar *str;
     GType ciphertype, authtype;
     GValue rtcp_cipher = G_VALUE_INIT, rtcp_auth = G_VALUE_INIT;
@@ -4308,6 +4308,22 @@ update_srtcp_params (GstRTSPStream * stream)
     gst_structure_get (s, "srtp-key", GST_TYPE_BUFFER, &buf, NULL);
     gst_structure_get (s, "mki", GST_TYPE_BUFFER, &mki_buf, NULL);
 
+    if (update) {
+      GstBuffer *current_mki_buf = NULL;
+
+      g_object_get (stream->srtpenc, "mki", &current_mki_buf, NULL);
+
+      if ((current_mki_buf != NULL) != (mki_buf != NULL)) {
+        GstRTSPSrc *rtspsrc = GST_RTSPSRC (stream->parent);
+        GST_WARNING_OBJECT (rtspsrc,
+            "Mixed MKI and non-MKI keys detected in the same SRTP session. "
+            "Current key has %s MKI, new key has %s MKI",
+            current_mki_buf ? "an" : "no", mki_buf ? "an" : "no");
+      }
+
+      gst_clear_buffer (&current_mki_buf);
+    }
+
     g_object_set_property (G_OBJECT (stream->srtpenc), "rtp-cipher",
         &rtcp_cipher);
     g_object_set_property (G_OBJECT (stream->srtpenc), "rtp-auth", &rtcp_auth);
@@ -4320,7 +4336,7 @@ update_srtcp_params (GstRTSPStream * stream)
     g_value_unset (&rtcp_cipher);
     g_value_unset (&rtcp_auth);
     gst_buffer_unref (buf);
-    gst_buffer_unref (mki_buf);
+    gst_clear_buffer (&mki_buf);
   }
 }
 
@@ -4363,7 +4379,7 @@ request_key (GstElement * srtpdec, guint ssrc, GstRTSPStream * stream)
       gst_caps_unref (stream->srtcpparams);
 
     stream->srtcpparams = signal_get_srtcp_params (rtspsrc, stream);
-    update_srtcp_params (stream);
+    update_srtcp_params (stream, TRUE);
   } else {
     GST_ERROR_OBJECT (rtspsrc, "No MIKEYs for stream with id %u", stream->id);
     return NULL;
@@ -4483,7 +4499,7 @@ request_rtcp_encoder (GstElement * rtpbin, guint session,
     }
 
     /* get RTCP crypto parameters from caps */
-    update_srtcp_params (stream);
+    update_srtcp_params (stream, FALSE);
   }
   name = g_strdup_printf ("rtcp_sink_%d", session);
   pad = gst_element_request_pad_simple (stream->srtpenc, name);
