@@ -249,7 +249,7 @@ static GstStaticPadTemplate gst_vtdec_sink_template =
 
 static SupplementalSupport gst_vtdec_codec_support = NoneSupported;
 
-#define VIDEO_SRC_CAPS_NATIVE_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE, BGRA, ARGB }"
+#define VIDEO_SRC_CAPS_NATIVE_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE, AV12, BGRA, ARGB }"
 
 /* TODO: Add support for more formats to videotexturecache-vulkan/gl.
  * VideoToolbox will output most formats with HW-backed buffers,
@@ -580,6 +580,7 @@ get_preferred_video_format (GstStructure * s, gboolean prores,
         if (!prores && !hevc_alpha)
           return vfmt;
         break;
+      case GST_VIDEO_FORMAT_AV12:
       case GST_VIDEO_FORMAT_BGRA:
       case GST_VIDEO_FORMAT_ARGB:
         if (hevc_alpha)

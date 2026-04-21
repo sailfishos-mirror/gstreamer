@@ -53,6 +53,8 @@ gst_video_format_from_cvpixelformat (int fmt)
     case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
     case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
       return GST_VIDEO_FORMAT_NV12;
+    case kCVPixelFormatType_420YpCbCr8VideoRange_8A_TriPlanar:
+      return GST_VIDEO_FORMAT_AV12;
     case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
     case kCVPixelFormatType_420YpCbCr10BiPlanarFullRange:
       return GST_VIDEO_FORMAT_P010_10LE;
@@ -86,6 +88,8 @@ gst_video_format_to_cvpixelformat (GstVideoFormat fmt)
       return kCVPixelFormatType_420YpCbCr8Planar;
     case GST_VIDEO_FORMAT_NV12:
       return kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+    case GST_VIDEO_FORMAT_AV12:
+      return kCVPixelFormatType_420YpCbCr8VideoRange_8A_TriPlanar;
     case GST_VIDEO_FORMAT_P010_10LE:
       return kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
     case GST_VIDEO_FORMAT_UYVY:
