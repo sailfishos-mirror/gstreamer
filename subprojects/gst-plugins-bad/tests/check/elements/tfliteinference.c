@@ -28,269 +28,12 @@
 #include <gst/video/video.h>
 #include <gst/analytics/analytics.h>
 
-#include <math.h>
-
-#include <gio/gio.h>
-#include <glib/gstdio.h>
+#include "inference-utils.h"
 
 #define TEST_WIDTH 4
 #define TEST_HEIGHT 4
 #define TEST_NUM_PIXELS (TEST_WIDTH * TEST_HEIGHT)
 #define TEST_NUM_CHANNELS 3
-
-static void
-fill_expected_flat_rgb_f32 (gfloat * out, gfloat r, gfloat g, gfloat b)
-{
-  gsize i;
-
-  for (i = 0; i < TEST_NUM_PIXELS; i++) {
-    out[i * 3 + 0] = r;
-    out[i * 3 + 1] = g;
-    out[i * 3 + 2] = b;
-  }
-}
-
-static void
-fill_expected_chw_rgb_f32 (gfloat * out, gfloat r, gfloat g, gfloat b)
-{
-  gsize i;
-
-  for (i = 0; i < TEST_NUM_PIXELS; i++) {
-    out[0 * TEST_NUM_PIXELS + i] = r;
-    out[1 * TEST_NUM_PIXELS + i] = g;
-    out[2 * TEST_NUM_PIXELS + i] = b;
-  }
-}
-
-static void
-fill_expected_gray_f32 (gfloat * out, gsize n_values, gfloat value)
-{
-  gsize i;
-
-  for (i = 0; i < n_values; i++)
-    out[i] = value;
-}
-
-static void
-fill_expected_flat_rgb_u8 (guint8 * out, guint8 r, guint8 g, guint8 b)
-{
-  gsize i;
-
-  for (i = 0; i < TEST_NUM_PIXELS; i++) {
-    out[i * 3 + 0] = r;
-    out[i * 3 + 1] = g;
-    out[i * 3 + 2] = b;
-  }
-}
-
-static void
-fill_expected_flat_rgb_i8 (gint8 * out, gint8 r, gint8 g, gint8 b)
-{
-  gsize i;
-
-  for (i = 0; i < TEST_NUM_PIXELS; i++) {
-    out[i * 3 + 0] = r;
-    out[i * 3 + 1] = g;
-    out[i * 3 + 2] = b;
-  }
-}
-
-static void
-tflite_test_assert_tensor_values_f32 (const GstTensor * tensor,
-    const gfloat * expected, gsize n_values, gfloat epsilon,
-    const gchar * file, gint line)
-{
-  GstMapInfo map;
-  const gfloat *actual;
-  gsize i;
-
-  fail_unless (tensor, "%s:%d tensor is NULL", file, line);
-  fail_unless_equals_int (tensor->data_type, GST_TENSOR_DATA_TYPE_FLOAT32);
-  fail_unless (gst_buffer_map (tensor->data, &map, GST_MAP_READ),
-      "%s:%d failed to map tensor data", file, line);
-  fail_unless (map.size == n_values * sizeof (gfloat),
-      "%s:%d tensor size=%zu expected=%zu", file, line, map.size,
-      n_values * sizeof (gfloat));
-
-  actual = (const gfloat *) map.data;
-  for (i = 0; i < n_values; i++) {
-    gfloat diff = fabsf (actual[i] - expected[i]);
-    fail_unless (diff <= epsilon,
-        "%s:%d value[%zu]=%.8f expected %.8f (diff %.8f > %.8f)",
-        file, line, i, actual[i], expected[i], diff, epsilon);
-  }
-
-  gst_buffer_unmap (tensor->data, &map);
-}
-
-static void
-tflite_test_assert_tensor_values_u8 (const GstTensor * tensor,
-    const guint8 * expected, gsize n_values, const gchar * file, gint line)
-{
-  GstMapInfo map;
-  const guint8 *actual;
-  gsize i;
-
-  fail_unless (tensor, "%s:%d tensor is NULL", file, line);
-  fail_unless_equals_int (tensor->data_type, GST_TENSOR_DATA_TYPE_UINT8);
-  fail_unless (gst_buffer_map (tensor->data, &map, GST_MAP_READ),
-      "%s:%d failed to map tensor data", file, line);
-  fail_unless (map.size == n_values * sizeof (guint8),
-      "%s:%d tensor size=%zu expected=%zu", file, line, map.size,
-      n_values * sizeof (guint8));
-
-  actual = (const guint8 *) map.data;
-  for (i = 0; i < n_values; i++) {
-    fail_unless (actual[i] == expected[i],
-        "%s:%d value[%zu]=%u expected %u", file, line, i,
-        (guint) actual[i], (guint) expected[i]);
-  }
-
-  gst_buffer_unmap (tensor->data, &map);
-}
-
-static void
-tflite_test_assert_tensor_values_i8 (const GstTensor * tensor,
-    const gint8 * expected, gsize n_values, const gchar * file, gint line)
-{
-  GstMapInfo map;
-  const gint8 *actual;
-  gsize i;
-
-  fail_unless (tensor, "%s:%d tensor is NULL", file, line);
-  fail_unless_equals_int (tensor->data_type, GST_TENSOR_DATA_TYPE_INT8);
-  fail_unless (gst_buffer_map (tensor->data, &map, GST_MAP_READ),
-      "%s:%d failed to map tensor data", file, line);
-  fail_unless (map.size == n_values * sizeof (gint8),
-      "%s:%d tensor size=%zu expected=%zu", file, line, map.size,
-      n_values * sizeof (gint8));
-
-  actual = (const gint8 *) map.data;
-  for (i = 0; i < n_values; i++) {
-    fail_unless (actual[i] == expected[i],
-        "%s:%d value[%zu]=%d expected %d", file, line, i,
-        (gint) actual[i], (gint) expected[i]);
-  }
-
-  gst_buffer_unmap (tensor->data, &map);
-}
-
-static gchar *
-setup_model_with_modelinfo (const gchar * base_model_name,
-    const gchar * modelinfo_content)
-{
-  gchar *base_model =
-      g_build_filename (GST_TFLITE_TEST_DATA_PATH, base_model_name, NULL);
-  gchar *tmp_model = g_strdup_printf ("%s%ctfliteinference-%u-%s",
-      g_get_tmp_dir (), G_DIR_SEPARATOR, g_random_int (), base_model_name);
-  gchar *tmp_modelinfo = g_strdup_printf ("%s.modelinfo", tmp_model);
-  GFile *src_file = g_file_new_for_path (base_model);
-  GFile *dst_file = g_file_new_for_path (tmp_model);
-
-  fail_unless (g_file_copy (src_file, dst_file, G_FILE_COPY_OVERWRITE, NULL,
-          NULL, NULL, NULL));
-  fail_unless (g_file_set_contents (tmp_modelinfo, modelinfo_content, -1,
-          NULL));
-
-  g_object_unref (src_file);
-  g_object_unref (dst_file);
-  g_free (base_model);
-  g_free (tmp_modelinfo);
-
-  return tmp_model;
-}
-
-static gchar *
-setup_model_with_ranges (const gchar * base_model_name, const gchar * ranges)
-{
-  gchar *base_model =
-      g_build_filename (GST_TFLITE_TEST_DATA_PATH, base_model_name, NULL);
-  gchar *base_modelinfo = g_strdup_printf ("%s.modelinfo", base_model);
-  GKeyFile *kf = g_key_file_new ();
-  gchar **groups;
-  gchar *data;
-  gsize len;
-  gsize i;
-  gchar *tmp_model;
-
-  g_key_file_set_list_separator (kf, ',');
-  fail_unless (g_key_file_load_from_file (kf, base_modelinfo, G_KEY_FILE_NONE,
-          NULL));
-
-  groups = g_key_file_get_groups (kf, NULL);
-  for (i = 0; groups[i]; i++) {
-    gchar *dir = g_key_file_get_string (kf, groups[i], "dir", NULL);
-
-    if (dir && g_strcmp0 (dir, "input") == 0)
-      g_key_file_set_string (kf, groups[i], "ranges", ranges);
-
-    g_free (dir);
-  }
-  g_strfreev (groups);
-
-  data = g_key_file_to_data (kf, &len, NULL);
-  tmp_model = setup_model_with_modelinfo (base_model_name, data);
-
-  g_free (data);
-  g_key_file_unref (kf);
-  g_free (base_modelinfo);
-  g_free (base_model);
-
-  return tmp_model;
-}
-
-static gchar *
-setup_model_without_input_info (const gchar * base_model_name)
-{
-  gchar *base_model =
-      g_build_filename (GST_TFLITE_TEST_DATA_PATH, base_model_name, NULL);
-  gchar *base_modelinfo = g_strdup_printf ("%s.modelinfo", base_model);
-  GKeyFile *kf = g_key_file_new ();
-  gchar **groups;
-  gchar *data;
-  gsize len;
-  gsize i;
-  gchar *tmp_model;
-
-  g_key_file_set_list_separator (kf, ',');
-  fail_unless (g_key_file_load_from_file (kf, base_modelinfo, G_KEY_FILE_NONE,
-          NULL));
-
-  groups = g_key_file_get_groups (kf, NULL);
-  for (i = 0; groups[i]; i++) {
-    gchar *dir = g_key_file_get_string (kf, groups[i], "dir", NULL);
-
-    if (dir && g_strcmp0 (dir, "input") == 0)
-      g_key_file_remove_group (kf, groups[i], NULL);
-
-    g_free (dir);
-  }
-  g_strfreev (groups);
-
-  data = g_key_file_to_data (kf, &len, NULL);
-  tmp_model = setup_model_with_modelinfo (base_model_name, data);
-
-  g_free (data);
-  g_key_file_unref (kf);
-  g_free (base_modelinfo);
-  g_free (base_model);
-
-  return tmp_model;
-}
-
-static void
-cleanup_temp_model (gchar * model_path)
-{
-  gchar *modelinfo = g_strdup_printf ("%s.modelinfo", model_path);
-
-  if (model_path)
-    g_remove (model_path);
-  if (modelinfo)
-    g_remove (modelinfo);
-
-  g_free (modelinfo);
-  g_free (model_path);
-}
 
 static GstHarness *
 harness_new_with_model (const gchar * model_path)
@@ -395,92 +138,16 @@ build_expected_output_caps (const gchar * format, gint width, gint height,
   return caps;
 }
 
-/* Creates buffers with solid gray value 42. */
-
-static GstBuffer *
-create_solid_gray_buffer (GstVideoFormat format)
-{
-  GstVideoInfo info;
-  GstBuffer *buf;
-  GstMapInfo map;
-  guint y, x;
-
-  fail_unless (gst_video_info_set_format (&info, format, TEST_WIDTH,
-          TEST_HEIGHT));
-
-  fail_unless (GST_VIDEO_INFO_IS_GRAY (&info));
-
-  buf = gst_buffer_new_and_alloc (info.size);
-  fail_unless (gst_buffer_map (buf, &map, GST_MAP_WRITE));
-
-  for (y = 0; y < TEST_HEIGHT; y++) {
-    guint8 *row = map.data + info.stride[0] * y;
-    for (x = 0; x < TEST_WIDTH; x++)
-      row[x] = 42;
-  }
-
-  gst_buffer_unmap (buf, &map);
-  return buf;
-}
-
-/* Creates buffers with color R=11 G=22 B=33 A=55*/
-
-static GstBuffer *
-create_solid_color_buffer (GstVideoFormat format)
-{
-  GstVideoInfo info;
-  GstBuffer *buf;
-  GstMapInfo map;
-  guint y, x;
-
-  fail_unless (gst_video_info_set_format (&info, format, TEST_WIDTH,
-          TEST_HEIGHT));
-
-  fail_unless (GST_VIDEO_INFO_IS_RGB (&info));
-
-  buf = gst_buffer_new_and_alloc (info.size);
-  fail_unless (gst_buffer_map (buf, &map, GST_MAP_WRITE));
-
-  for (y = 0; y < TEST_HEIGHT; y++) {
-    guint8 *r = map.data +
-        GST_VIDEO_INFO_COMP_OFFSET (&info, GST_VIDEO_COMP_R) +
-        GST_VIDEO_INFO_COMP_STRIDE (&info, GST_VIDEO_COMP_R) * y;
-    guint8 *g = map.data +
-        GST_VIDEO_INFO_COMP_OFFSET (&info, GST_VIDEO_COMP_G) +
-        GST_VIDEO_INFO_COMP_STRIDE (&info, GST_VIDEO_COMP_G) * y;
-    guint8 *b = map.data +
-        GST_VIDEO_INFO_COMP_OFFSET (&info, GST_VIDEO_COMP_B) +
-        GST_VIDEO_INFO_COMP_STRIDE (&info, GST_VIDEO_COMP_B) * y;
-    guint8 *a = NULL;
-
-    if (GST_VIDEO_INFO_HAS_ALPHA (&info))
-      a = map.data +
-          GST_VIDEO_INFO_COMP_OFFSET (&info, GST_VIDEO_COMP_A) +
-          GST_VIDEO_INFO_COMP_STRIDE (&info, GST_VIDEO_COMP_A) * y;
-
-    for (x = 0; x < TEST_WIDTH; x++) {
-      r[x * GST_VIDEO_INFO_COMP_PSTRIDE (&info, GST_VIDEO_COMP_R)] = 11;
-      g[x * GST_VIDEO_INFO_COMP_PSTRIDE (&info, GST_VIDEO_COMP_G)] = 22;
-      b[x * GST_VIDEO_INFO_COMP_PSTRIDE (&info, GST_VIDEO_COMP_B)] = 33;
-      if (a)
-        a[x * GST_VIDEO_INFO_COMP_PSTRIDE (&info, GST_VIDEO_COMP_A)] = 55;
-    }
-  }
-
-  gst_buffer_unmap (buf, &map);
-  return buf;
-}
-
 #define TFLITE_TEST_ASSERT_TENSOR_VALUES_F32(tensor, expected, n_values, epsilon) \
-  tflite_test_assert_tensor_values_f32 ((tensor), (expected), (n_values), \
+  assert_tensor_values_f32 ((tensor), (expected), (n_values), \
       (epsilon), __FILE__, __LINE__)
 
 #define TFLITE_TEST_ASSERT_TENSOR_VALUES_U8(tensor, expected, n_values) \
-  tflite_test_assert_tensor_values_u8 ((tensor), (expected), (n_values), \
+  assert_tensor_values_u8 ((tensor), (expected), (n_values), \
       __FILE__, __LINE__)
 
 #define TFLITE_TEST_ASSERT_TENSOR_VALUES_I8(tensor, expected, n_values) \
-  tflite_test_assert_tensor_values_i8 ((tensor), (expected), (n_values), \
+  assert_tensor_values_i8 ((tensor), (expected), (n_values), \
       __FILE__, __LINE__)
 
 /* Test that RGB, RGBA, BGR and BGRA input formats all produce correct float32 output tensors. */
@@ -494,11 +161,12 @@ GST_START_TEST (test_input_formats)
   guint i;
 
   for (i = 0; i < G_N_ELEMENTS (formats); i++) {
-    gchar *tmp_model =
-        setup_model_with_ranges ("flatten_float32in_float32out.tflite",
+    gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+        "tfliteinference", "flatten_float32in_float32out.tflite",
         "0.0,255.0;0.0,255.0;0.0,255.0");
     GstHarness *h = harness_new_with_model (tmp_model);
-    GstBuffer *in = create_solid_color_buffer (formats[i]);
+    GstBuffer *in = create_solid_color_buffer (formats[i],
+        TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
     GstBuffer *out;
     GstTensorMeta *tmeta;
     const GstTensor *tensor;
@@ -544,7 +212,7 @@ GST_START_TEST (test_input_formats)
     gst_caps_unref (actual_caps);
     gst_caps_unref (expected_caps);
 
-    fill_expected_flat_rgb_f32 (expected, 11, 22, 33);
+    fill_expected_flat_rgb_f32 (expected, TEST_NUM_PIXELS, 11, 22, 33);
     TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
         G_N_ELEMENTS (expected), 1e-6f);
 
@@ -559,8 +227,8 @@ GST_END_TEST;
 /* Test that the GBRP planar format is advertised in the sink caps returned by a caps query. */
 GST_START_TEST (test_gbrp_caps_input)
 {
-  gchar *tmp_model =
-      setup_model_with_ranges ("flatten_float32in_float32out.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "flatten_float32in_float32out.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
   GstPad *sinkpad = gst_element_get_static_pad (h->element, "sink");
@@ -615,11 +283,12 @@ GST_END_TEST;
 /* Test that planar RGBP input fed to a uint8 CHW model passes through without conversion and yields correct float32 output. */
 GST_START_TEST (test_planar_uint8_input_passthrough)
 {
-  gchar *tmp_model =
-      setup_model_with_ranges ("planar_chw_uint8in_float32out.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "planar_chw_uint8in_float32out.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGBP);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGBP,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -661,7 +330,7 @@ GST_START_TEST (test_planar_uint8_input_passthrough)
   gst_caps_unref (actual_caps);
   gst_caps_unref (expected_caps);
 
-  fill_expected_chw_rgb_f32 (expected, 11.f, 22.f, 33.f);
+  fill_expected_chw_rgb_f32 (expected, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
   TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
       G_N_ELEMENTS (expected), 1e-6f);
   gst_buffer_unref (out);
@@ -674,10 +343,11 @@ GST_END_TEST;
 /* Test that a model without input information still produces the correct output. */
 GST_START_TEST (test_no_input_modelinfo)
 {
-  gchar *tmp_model =
-      setup_model_without_input_info ("flatten_uint8in_float32out.tflite");
+  gchar *tmp_model = setup_model_without_input_info (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "flatten_uint8in_float32out.tflite");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -716,9 +386,11 @@ GST_END_TEST;
  */
 GST_START_TEST (test_gray8_input_conversion)
 {
-  gchar *tmp_model = setup_model_with_ranges ("grayscale_4d.tflite", "0.0,1.0");
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "grayscale_4d.tflite", "0.0,1.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_gray_buffer (GST_VIDEO_FORMAT_GRAY8);
+  GstBuffer *in = create_solid_gray_buffer (GST_VIDEO_FORMAT_GRAY8, TEST_WIDTH,
+      TEST_HEIGHT, 42);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -810,11 +482,11 @@ GST_END_TEST;
  */
 GST_START_TEST (test_gray8_input_passthrough)
 {
-  gchar *tmp_model =
-      setup_model_with_ranges ("grayscale_uint8in_float32out.tflite",
-      "0.0,255.0");
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "grayscale_uint8in_float32out.tflite", "0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_gray_buffer (GST_VIDEO_FORMAT_GRAY8);
+  GstBuffer *in = create_solid_gray_buffer (GST_VIDEO_FORMAT_GRAY8, TEST_WIDTH,
+      TEST_HEIGHT, 42);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -890,11 +562,12 @@ GST_START_TEST (test_normalization_variants)
   guint i;
 
   for (i = 0; i < G_N_ELEMENTS (tests); i++) {
-    gchar *tmp_model =
-        setup_model_with_ranges ("flatten_float32in_float32out.tflite",
+    gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+        "tfliteinference", "flatten_float32in_float32out.tflite",
         tests[i].ranges);
     GstHarness *h = harness_new_with_model (tmp_model);
-    GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+    GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+        TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
     GstBuffer *out;
     GstTensorMeta *tmeta;
     const GstTensor *tensor;
@@ -937,7 +610,8 @@ GST_START_TEST (test_normalization_variants)
     gst_caps_unref (actual_caps);
     gst_caps_unref (expected_caps);
 
-    fill_expected_flat_rgb_f32 (expected, tests[i].r, tests[i].g, tests[i].b);
+    fill_expected_flat_rgb_f32 (expected, TEST_NUM_PIXELS,
+        (gfloat) tests[i].r, (gfloat) tests[i].g, (gfloat) tests[i].b);
     TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
         G_N_ELEMENTS (expected), 1e-5f);
 
@@ -964,10 +638,12 @@ GST_START_TEST (test_output_dtypes)
   guint i;
 
   for (i = 0; i < G_N_ELEMENTS (tests); i++) {
-    gchar *tmp_model = setup_model_with_ranges (tests[i].model_name,
+    gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+        "tfliteinference", tests[i].model_name,
         "0.0,255.0;0.0,255.0;0.0,255.0");
     GstHarness *h = harness_new_with_model (tmp_model);
-    GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+    GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+        TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
     GstBuffer *out;
     GstTensorMeta *tmeta;
     const GstTensor *tensor;
@@ -1021,11 +697,11 @@ GST_START_TEST (test_output_dtypes)
     gst_caps_unref (expected_caps);
 
     if (tests[i].expected_type == GST_TENSOR_DATA_TYPE_UINT8) {
-      fill_expected_flat_rgb_u8 (expected_u8, 11, 22, 33);
+      fill_expected_flat_rgb_u8 (expected_u8, TEST_NUM_PIXELS, 11, 22, 33);
       TFLITE_TEST_ASSERT_TENSOR_VALUES_U8 (tensor, expected_u8,
           G_N_ELEMENTS (expected_u8));
     } else {
-      fill_expected_flat_rgb_i8 (expected_i8, 11, 22, 33);
+      fill_expected_flat_rgb_i8 (expected_i8, TEST_NUM_PIXELS, 11, 22, 33);
       TFLITE_TEST_ASSERT_TENSOR_VALUES_I8 (tensor, expected_i8,
           G_N_ELEMENTS (expected_i8));
     }
@@ -1041,10 +717,12 @@ GST_END_TEST;
 /* Test that a model with a dynamic batch dimension (-1) is handled correctly. */
 GST_START_TEST (test_dynamic_dims)
 {
-  gchar *tmp_model = setup_model_with_ranges ("dynamic_batch.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "dynamic_batch.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -1084,7 +762,7 @@ GST_START_TEST (test_dynamic_dims)
   gst_caps_unref (actual_caps);
   gst_caps_unref (expected_caps);
 
-  fill_expected_flat_rgb_f32 (expected, 11.f, 22.f, 33.f);
+  fill_expected_flat_rgb_f32 (expected, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
   TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
       G_N_ELEMENTS (expected), 1e-6f);
 
@@ -1098,10 +776,12 @@ GST_END_TEST;
 /* Test a model with two outputs in different dimension orders (row-major and col-major), verifying tensor IDs and values. */
 GST_START_TEST (test_multi_output_tensor_id_and_dims_order)
 {
-  gchar *tmp_model = setup_model_with_ranges ("multi_output.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "multi_output.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -1121,8 +801,8 @@ GST_START_TEST (test_multi_output_tensor_id_and_dims_order)
       "video/x-raw,format=RGB,width=4,height=4,framerate=30/1");
   out = gst_harness_push_and_pull (h, in);
   fail_unless (out);
-  fill_expected_flat_rgb_f32 (expected_flat, 11.f, 22.f, 33.f);
-  fill_expected_chw_rgb_f32 (expected_chw, 11.f, 22.f, 33.f);
+  fill_expected_flat_rgb_f32 (expected_flat, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
+  fill_expected_chw_rgb_f32 (expected_chw, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
 
   tmeta = gst_buffer_get_tensor_meta (out);
   fail_unless_equals_int (tmeta->num_tensors, 2);
@@ -1300,10 +980,12 @@ GST_END_TEST;
 /* Test a model whose input is a 3-D CHW tensor, verifying that the channel plane layout is preserved in the output. */
 GST_START_TEST (test_3d_input_tensor)
 {
-  gchar *tmp_model = setup_model_with_ranges ("flatten_3d_float32.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "flatten_3d_float32.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -1343,7 +1025,7 @@ GST_START_TEST (test_3d_input_tensor)
   gst_caps_unref (actual_caps);
   gst_caps_unref (expected_caps);
 
-  fill_expected_chw_rgb_f32 (expected, 11, 22, 33);
+  fill_expected_chw_rgb_f32 (expected, TEST_NUM_PIXELS, 11, 22, 33);
   TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
       G_N_ELEMENTS (expected), 1e-6f);
 
@@ -1357,11 +1039,12 @@ GST_END_TEST;
 /* Test that ARGB input (alpha first, big-endian) is correctly unpacked and produces the right float32 RGB values. */
 GST_START_TEST (test_argb_input)
 {
-  gchar *tmp_model =
-      setup_model_with_ranges ("flatten_float32in_float32out.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "flatten_float32in_float32out.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_ARGB);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_ARGB,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -1388,7 +1071,7 @@ GST_START_TEST (test_argb_input)
   fail_unless_equals_int ((gint) tensor->num_dims, 2);
   fail_unless_equals_int ((gint) tensor->dims[0], 1);
   fail_unless_equals_int ((gint) tensor->dims[1], 48);
-  fill_expected_flat_rgb_f32 (expected, 11.f, 22.f, 33.f);
+  fill_expected_flat_rgb_f32 (expected, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
   TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
       G_N_ELEMENTS (expected), 1e-6f);
 
@@ -1402,11 +1085,12 @@ GST_END_TEST;
 /* Test that ABGR input (alpha first, reversed channel order) is correctly unpacked and produces the right float32 RGB values. */
 GST_START_TEST (test_abgr_input)
 {
-  gchar *tmp_model =
-      setup_model_with_ranges ("flatten_float32in_float32out.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "flatten_float32in_float32out.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_ABGR);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_ABGR,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -1433,7 +1117,7 @@ GST_START_TEST (test_abgr_input)
   fail_unless_equals_int ((gint) tensor->num_dims, 2);
   fail_unless_equals_int ((gint) tensor->dims[0], 1);
   fail_unless_equals_int ((gint) tensor->dims[1], 48);
-  fill_expected_flat_rgb_f32 (expected, 11.f, 22.f, 33.f);
+  fill_expected_flat_rgb_f32 (expected, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
   TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
       G_N_ELEMENTS (expected), 1e-6f);
 
@@ -1447,11 +1131,12 @@ GST_END_TEST;
 /* Test that PTS, DTS, duration and the DISCONT flag are forwarded unchanged from the input buffer to the output. */
 GST_START_TEST (test_timestamp_and_flags_propagation)
 {
-  gchar *tmp_model =
-      setup_model_with_ranges ("flatten_float32in_float32out.tflite",
+  gchar *tmp_model = setup_model_with_ranges (GST_TFLITE_TEST_DATA_PATH,
+      "tfliteinference", "flatten_float32in_float32out.tflite",
       "0.0,255.0;0.0,255.0;0.0,255.0");
   GstHarness *h = harness_new_with_model (tmp_model);
-  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB);
+  GstBuffer *in = create_solid_color_buffer (GST_VIDEO_FORMAT_RGB,
+      TEST_WIDTH, TEST_HEIGHT, 11, 22, 33, 55);
   GstBuffer *out;
   GstTensorMeta *tmeta;
   const GstTensor *tensor;
@@ -1502,7 +1187,7 @@ GST_START_TEST (test_timestamp_and_flags_propagation)
   gst_caps_unref (actual_caps);
   gst_caps_unref (expected_caps);
 
-  fill_expected_flat_rgb_f32 (expected, 11.f, 22.f, 33.f);
+  fill_expected_flat_rgb_f32 (expected, TEST_NUM_PIXELS, 11.f, 22.f, 33.f);
   TFLITE_TEST_ASSERT_TENSOR_VALUES_F32 (tensor, expected,
       G_N_ELEMENTS (expected), 1e-6f);
 
