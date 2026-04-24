@@ -759,6 +759,7 @@ gst_onnx_inference_start (GstBaseTransform * trans)
   OrtStatus *status = NULL;
   OrtSessionOptions *session_options = NULL;
   OrtTypeInfo *input_type_info = NULL;
+  size_t input_count = 0;
   const OrtTensorTypeAndShapeInfo *input_tensor_info = NULL;
   GraphOptimizationLevel onnx_optim;
   size_t num_input_dims;
@@ -921,6 +922,19 @@ gst_onnx_inference_start (GstBaseTransform * trans)
   if (status) {
     GST_ERROR_OBJECT (self, "Failed to get allocator: %s",
         api->GetErrorMessage (status));
+    goto error;
+  }
+  // Get input count
+  status = api->SessionGetInputCount (self->session, &input_count);
+  if (status) {
+    GST_ERROR_OBJECT (self, "Failed to get input count: %s",
+        api->GetErrorMessage (status));
+    goto error;
+  }
+
+  if (input_count != 1) {
+    GST_ERROR_OBJECT (self, "Only models with 1 input tensor are supported,"
+        " but model has %zu inputs", input_count);
     goto error;
   }
   // Get input info

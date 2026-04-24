@@ -468,6 +468,7 @@ GST_START_TEST (test_invalid_model_shapes_and_files)
   assert_model_fails_to_start ("invalid_dims_5d.onnx");
   assert_model_fails_to_start ("invalid_dims_channels_2.onnx");
   assert_model_fails_to_start ("corrupt_model.onnx");
+  assert_model_fails_to_start ("multi_input_two_tensors.onnx");
 }
 
 GST_END_TEST;
