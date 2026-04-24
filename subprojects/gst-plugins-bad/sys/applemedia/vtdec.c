@@ -1205,15 +1205,19 @@ gst_vtdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
       status == codecErr ||
 #endif
       status == kVTVideoDecoderMalfunctionErr) {
-    GST_WARNING_OBJECT (vtdec, "DecodeFrame returned %i, resetting session",
-        status);
-    if (!gst_vtdec_reset_session (vtdec))
-      return GST_FLOW_ERROR;
+    GST_WARNING_OBJECT (vtdec,
+        "DecodeFrame returned %i, resetting session", status);
+    if (!gst_vtdec_reset_session (vtdec)) {
+      ret = GST_FLOW_ERROR;
+      gst_video_decoder_drop_frame (decoder, frame);
+      goto out;
+    }
 
     gst_video_decoder_request_sync_point (decoder, frame,
         GST_VIDEO_DECODER_REQUEST_SYNC_POINT_DISCARD_INPUT);
     gst_video_decoder_drop_frame (decoder, frame);
-    return GST_FLOW_OK;
+    ret = GST_FLOW_OK;
+    goto out;
   }
 
   if (status != noErr) {
