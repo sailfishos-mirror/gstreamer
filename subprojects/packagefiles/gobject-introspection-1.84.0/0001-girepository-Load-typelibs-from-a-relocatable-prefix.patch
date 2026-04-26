@@ -1,7 +1,7 @@
-From 079cd66c77d53cdf5007002bd225658e221715c3 Mon Sep 17 00:00:00 2001
+From 279abab26eca85054c95ee3259733864f6d04d86 Mon Sep 17 00:00:00 2001
 From: Nirbheek Chauhan <nirbheek@centricular.com>
 Date: Wed, 12 Feb 2025 20:32:59 +0530
-Subject: [PATCH 3/9] girepository: Load typelibs from a relocatable prefix on
+Subject: [PATCH 1/9] girepository: Load typelibs from a relocatable prefix on
  macOS
 
 This is already relocatable on Windows.
@@ -48,5 +48,5 @@ index 12eaf366..ca47cd55 100644
  #endif
  
 -- 
-2.47.0.windows.2
+2.53.0
 
