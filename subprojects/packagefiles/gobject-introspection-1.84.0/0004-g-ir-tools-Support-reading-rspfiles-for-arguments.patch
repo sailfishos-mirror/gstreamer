@@ -1,7 +1,7 @@
-From 67f5fc047ccdbfcc3396b42fba54e9f06db93382 Mon Sep 17 00:00:00 2001
+From 8a3021e21cf5dc76d06f2d0f16d317cb31479973 Mon Sep 17 00:00:00 2001
 From: "L. E. Segovia" <amy@centricular.com>
 Date: Thu, 5 Jun 2025 12:25:14 -0300
-Subject: [PATCH 7/9] g-ir-tools: Support reading @rspfiles for arguments
+Subject: [PATCH 4/9] g-ir-tools: Support reading @rspfiles for arguments
 
 This is needed on Windows, where the argument list can exceed the
 maximum command-line length when many cflags are being passed.
@@ -58,5 +58,5 @@ index 469af0ca..648c9abc 100755
 -sys.exit(@TOOL_FUNCTION@(sys.argv))
 +sys.exit(@TOOL_FUNCTION@(args))
 -- 
-2.47.0.windows.2
+2.53.0
 
