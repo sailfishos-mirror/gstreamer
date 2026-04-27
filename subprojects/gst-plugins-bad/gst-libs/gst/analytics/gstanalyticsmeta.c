@@ -62,6 +62,7 @@ typedef struct
   const GstAnalyticsMtdImpl *impl;
   guint id;
   gsize size;
+  GstIdStr semantic_tag;
   gpointer data[];
 } GstAnalyticsRelatableMtdData;
 
@@ -209,6 +210,121 @@ gst_analytics_mtd_type_get_name (GstAnalyticsMtdType type)
     return "ANY";
   else
     return impl->name;
+}
+
+/**
+ * gst_analytics_mtd_set_semantic_tag:
+ * @instance: Instance of #GstAnalyticsMtd
+ * @tag: (nullable): string representing a semantic type, or %NULL to clear
+ *   the tag
+ *
+ * Set semantic tag on any analytics metadata. This gives context to understand
+ * the metadata. Pass %NULL to clear the tag.
+ *
+ * Returns: %TRUE if the semantic tag was set successfully.
+ *
+ * Since: 1.30
+ */
+gboolean
+gst_analytics_mtd_set_semantic_tag (GstAnalyticsMtd * instance,
+    const gchar * tag)
+{
+  GstAnalyticsRelatableMtdData *rlt;
+
+  g_return_val_if_fail (instance, FALSE);
+
+  rlt = gst_analytics_relation_meta_get_mtd_data_internal (instance->meta,
+      instance->id);
+  g_return_val_if_fail (rlt != NULL, FALSE);
+
+  if (tag)
+    gst_id_str_set (&rlt->semantic_tag, tag);
+  else
+    gst_id_str_clear (&rlt->semantic_tag);
+
+  return TRUE;
+}
+
+/**
+ * gst_analytics_mtd_get_semantic_tag:
+ * @instance: Instance of #GstAnalyticsMtd
+ *
+ * Get the semantic tag of the analytics metadata.
+ *
+ * Returns: (transfer full): A copy of the semantic tag string. Returns an
+ *    empty string if no tag has been set. The caller must free the returned
+ *    string with g_free() when no longer needed.
+ *
+ * Since: 1.30
+ */
+gchar *
+gst_analytics_mtd_get_semantic_tag (const GstAnalyticsMtd * instance)
+{
+  GstAnalyticsRelatableMtdData *rlt;
+
+  g_return_val_if_fail (instance, NULL);
+
+  rlt = gst_analytics_relation_meta_get_mtd_data_internal (instance->meta,
+      instance->id);
+  g_return_val_if_fail (rlt != NULL, NULL);
+
+  return g_strdup (gst_id_str_as_str (&rlt->semantic_tag));
+}
+
+/**
+ * gst_analytics_mtd_has_semantic_tag:
+ * @instance: Instance of #GstAnalyticsMtd
+ * @tag: tag string to compare against
+ *
+ * Check if the metadata's semantic tag matches @tag. An empty or unset tag
+ * never matches.
+ *
+ * Returns: %TRUE if the metadata's semantic tag equals @tag.
+ *
+ * Since: 1.30
+ */
+gboolean
+gst_analytics_mtd_has_semantic_tag (const GstAnalyticsMtd * instance,
+    const gchar * tag)
+{
+  GstAnalyticsRelatableMtdData *rlt;
+
+  g_return_val_if_fail (instance, FALSE);
+  g_return_val_if_fail (tag, FALSE);
+
+  rlt = gst_analytics_relation_meta_get_mtd_data_internal (instance->meta,
+      instance->id);
+  g_return_val_if_fail (rlt != NULL, FALSE);
+
+  return gst_id_str_is_equal_to_str (&rlt->semantic_tag, tag);
+}
+
+/**
+ * gst_analytics_mtd_semantic_tag_has_prefix:
+ * @instance: Instance of #GstAnalyticsMtd
+ * @prefix: prefix string to test against
+ *
+ * Check if the metadata's semantic tag starts with @prefix. An empty or unset
+ * tag never matches.
+ *
+ * Returns: %TRUE if the metadata's semantic tag starts with @prefix.
+ *
+ * Since: 1.30
+ */
+gboolean
+gst_analytics_mtd_semantic_tag_has_prefix (const GstAnalyticsMtd * instance,
+    const gchar * prefix)
+{
+  GstAnalyticsRelatableMtdData *rlt;
+
+  g_return_val_if_fail (instance, FALSE);
+  g_return_val_if_fail (prefix, FALSE);
+
+  rlt = gst_analytics_relation_meta_get_mtd_data_internal (instance->meta,
+      instance->id);
+  g_return_val_if_fail (rlt != NULL, FALSE);
+
+  return g_str_has_prefix (gst_id_str_as_str (&rlt->semantic_tag), prefix);
 }
 
 /**
@@ -403,6 +519,15 @@ gst_analytics_relation_meta_transform (GstBuffer * transbuf,
 
     memcpy (dst_data, src_mtd_data->data, src_mtd_data->size);
 
+    /* Copy semantic tag from source to destination */
+    {
+      GstAnalyticsRelatableMtdData *dst_mtd_data =
+          gst_analytics_relation_meta_get_mtd_data_internal (dst_rmeta,
+          dst_mtd.id);
+      gst_id_str_set (&dst_mtd_data->semantic_tag,
+          gst_id_str_as_str (&src_mtd_data->semantic_tag));
+    }
+
     if (src_mtd_data->impl->mtd_meta_transform) {
       if (src_mtd_data->impl->mtd_meta_transform (transbuf, &dst_mtd, buffer,
               type, data)) {
@@ -463,6 +588,7 @@ gst_analytics_relation_meta_clear (GstBuffer * buffer, GstMeta * meta)
       mtd.meta = rmeta;
       rlt_mtd_data->impl->mtd_meta_clear (buffer, &mtd);
     }
+    gst_id_str_clear (&rlt_mtd_data->semantic_tag);
   }
 
   gsize adj_mat_data_size =
@@ -936,6 +1062,7 @@ gst_analytics_relation_meta_add_mtd (GstAnalyticsRelationMeta * meta,
     dest->impl = impl;
     dest->id = gst_analytics_relation_meta_get_next_id (meta);
     dest->size = size;
+    gst_id_str_init (&dest->semantic_tag);
     meta->mtd_data_lookup[dest->id] = meta->offset;
     meta->offset += object_size;
     meta->length++;

@@ -2272,42 +2272,41 @@ GST_START_TEST (test_group_mtd_semantic_tag)
   fail_unless (ret == TRUE);
 
   /* Before setting a tag, get_semantic_tag should return an empty string */
-  tag = gst_analytics_group_mtd_get_semantic_tag (&group_mtd);
+  tag = gst_analytics_mtd_get_semantic_tag (&group_mtd);
   fail_unless (tag != NULL);
   fail_unless_equals_string (tag, "");
   g_free (tag);
 
   /* Set semantic tag using string */
-  ret = gst_analytics_group_mtd_set_semantic_tag (&group_mtd, tag_str);
+  ret = gst_analytics_mtd_set_semantic_tag (&group_mtd, tag_str);
   fail_unless (ret == TRUE);
 
   /* Verify the tag was set correctly via has_semantic_tag */
-  fail_unless (gst_analytics_group_mtd_has_semantic_tag (&group_mtd, tag_str));
+  fail_unless (gst_analytics_mtd_has_semantic_tag (&group_mtd, tag_str));
 
   /* Verify the tag was set correctly via get_semantic_tag */
-  tag = gst_analytics_group_mtd_get_semantic_tag (&group_mtd);
+  tag = gst_analytics_mtd_get_semantic_tag (&group_mtd);
   fail_unless (tag != NULL);
   fail_unless_equals_string (tag, tag_str);
   g_free (tag);
 
   /* Change the tag and verify the new value */
-  ret = gst_analytics_group_mtd_set_semantic_tag (&group_mtd,
-      "posture/body-17-kp");
+  ret = gst_analytics_mtd_set_semantic_tag (&group_mtd, "posture/body-17-kp");
   fail_unless (ret == TRUE);
 
-  tag = gst_analytics_group_mtd_get_semantic_tag (&group_mtd);
+  tag = gst_analytics_mtd_get_semantic_tag (&group_mtd);
   fail_unless (tag != NULL);
   fail_unless_equals_string (tag, "posture/body-17-kp");
   g_free (tag);
-  fail_unless (!gst_analytics_group_mtd_has_semantic_tag (&group_mtd, tag_str));
+  fail_unless (!gst_analytics_mtd_has_semantic_tag (&group_mtd, tag_str));
 
   /* Test unsetting tag with NULL */
-  ret = gst_analytics_group_mtd_set_semantic_tag (&group_mtd, NULL);
+  ret = gst_analytics_mtd_set_semantic_tag (&group_mtd, NULL);
   fail_unless (ret == TRUE);
 
-  fail_unless (!gst_analytics_group_mtd_has_semantic_tag (&group_mtd, tag_str));
+  fail_unless (!gst_analytics_mtd_has_semantic_tag (&group_mtd, tag_str));
 
-  tag = gst_analytics_group_mtd_get_semantic_tag (&group_mtd);
+  tag = gst_analytics_mtd_get_semantic_tag (&group_mtd);
   fail_unless (tag != NULL);
   fail_unless_equals_string (tag, "");
   g_free (tag);
@@ -2332,24 +2331,22 @@ GST_START_TEST (test_group_mtd_semantic_tag_has_prefix)
       &group_mtd);
   fail_unless (ret == TRUE);
 
-  ret =
-      gst_analytics_group_mtd_set_semantic_tag (&group_mtd,
-      "posture/hand-21-kp");
+  ret = gst_analytics_mtd_set_semantic_tag (&group_mtd, "posture/hand-21-kp");
   fail_unless (ret == TRUE);
 
-  fail_unless (gst_analytics_group_mtd_semantic_tag_has_prefix (&group_mtd,
+  fail_unless (gst_analytics_mtd_semantic_tag_has_prefix (&group_mtd,
           "posture/"));
-  fail_unless (gst_analytics_group_mtd_semantic_tag_has_prefix (&group_mtd,
+  fail_unless (gst_analytics_mtd_semantic_tag_has_prefix (&group_mtd,
           "posture/hand-21-kp"));
-  fail_unless (!gst_analytics_group_mtd_semantic_tag_has_prefix (&group_mtd,
+  fail_unless (!gst_analytics_mtd_semantic_tag_has_prefix (&group_mtd,
           "posture/body"));
-  fail_unless (!gst_analytics_group_mtd_semantic_tag_has_prefix (&group_mtd,
+  fail_unless (!gst_analytics_mtd_semantic_tag_has_prefix (&group_mtd,
           "keypoint/"));
 
   /* Unset tag should not match any prefix */
-  ret = gst_analytics_group_mtd_set_semantic_tag (&group_mtd, NULL);
+  ret = gst_analytics_mtd_set_semantic_tag (&group_mtd, NULL);
   fail_unless (ret == TRUE);
-  fail_unless (!gst_analytics_group_mtd_semantic_tag_has_prefix (&group_mtd,
+  fail_unless (!gst_analytics_mtd_semantic_tag_has_prefix (&group_mtd,
           "posture/"));
 
   gst_buffer_unref (buf);
@@ -2374,7 +2371,7 @@ GST_START_TEST (test_group_mtd_retrieval)
   fail_unless (ret == TRUE);
 
   /* Setting semantic tag */
-  gst_analytics_group_mtd_set_semantic_tag (&group_mtd, "test-group");
+  gst_analytics_mtd_set_semantic_tag (&group_mtd, "test-group");
 
   /* Retrieve the group using the get function */
   ret = gst_analytics_relation_meta_get_group_mtd (rmeta, group_mtd.id,
@@ -2385,12 +2382,12 @@ GST_START_TEST (test_group_mtd_retrieval)
   fail_unless (retrieved_mtd.id == group_mtd.id);
   fail_unless (retrieved_mtd.meta == group_mtd.meta);
 
-  fail_unless (gst_analytics_group_mtd_has_semantic_tag (&retrieved_mtd,
+  fail_unless (gst_analytics_mtd_has_semantic_tag (&retrieved_mtd,
           "test-group"));
 
   /* Verify get_semantic_tag also works on retrieved handle */
   {
-    gchar *sem_tag = gst_analytics_group_mtd_get_semantic_tag (&retrieved_mtd);
+    gchar *sem_tag = gst_analytics_mtd_get_semantic_tag (&retrieved_mtd);
     fail_unless_equals_string (sem_tag, "test-group");
     g_free (sem_tag);
   }
@@ -2420,7 +2417,7 @@ GST_START_TEST (test_group_mtd_with_relations)
       &group_mtd);
   fail_unless (ret == TRUE);
 
-  gst_analytics_group_mtd_set_semantic_tag (&group_mtd, "hand-21-kp");
+  gst_analytics_mtd_set_semantic_tag (&group_mtd, "hand-21-kp");
 
   /* Create an OD for the hand bounding box */
   GQuark type = g_quark_from_string ("hand");
@@ -2793,10 +2790,9 @@ GST_START_TEST (test_add_keypoints_group_without_skeleton)
   fail_unless (member_count == 5);
 
   /* Verify semantic tag */
-  fail_unless (gst_analytics_group_mtd_has_semantic_tag (&group_mtd,
-          "test-5-kp"));
+  fail_unless (gst_analytics_mtd_has_semantic_tag (&group_mtd, "test-5-kp"));
   {
-    gchar *sem_tag = gst_analytics_group_mtd_get_semantic_tag (&group_mtd);
+    gchar *sem_tag = gst_analytics_mtd_get_semantic_tag (&group_mtd);
     fail_unless_equals_string (sem_tag, "test-5-kp");
     g_free (sem_tag);
   }
@@ -3158,6 +3154,251 @@ GST_START_TEST (test_keypoint_group_2d_vs_3d)
 
 GST_END_TEST;
 
+GST_START_TEST (test_mtd_semantic_tag_on_od)
+{
+  /* Verify generic semantic tag works on object detection metadata */
+  GstBuffer *buf;
+  GstAnalyticsRelationMeta *rmeta;
+  GstAnalyticsODMtd od_mtd;
+  gboolean ret;
+  gchar *tag;
+
+  buf = gst_buffer_new ();
+  rmeta = gst_buffer_add_analytics_relation_meta (buf);
+
+  GQuark type = g_quark_from_string ("person");
+  ret = gst_analytics_relation_meta_add_od_mtd (rmeta, type, 10, 20, 30, 40,
+      0.9f, &od_mtd);
+  fail_unless (ret == TRUE);
+
+  /* Initially no semantic tag */
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & od_mtd);
+  fail_unless (tag != NULL);
+  fail_unless_equals_string (tag, "");
+  g_free (tag);
+
+  /* Set and verify */
+  ret = gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & od_mtd,
+      "detector/yolov8");
+  fail_unless (ret == TRUE);
+
+  fail_unless (gst_analytics_mtd_has_semantic_tag ((GstAnalyticsMtd *) & od_mtd,
+          "detector/yolov8"));
+  fail_unless (!gst_analytics_mtd_has_semantic_tag (
+          (GstAnalyticsMtd *) & od_mtd, "detector/ssd"));
+
+  fail_unless (gst_analytics_mtd_semantic_tag_has_prefix (
+          (GstAnalyticsMtd *) & od_mtd, "detector/"));
+  fail_unless (!gst_analytics_mtd_semantic_tag_has_prefix (
+          (GstAnalyticsMtd *) & od_mtd, "classifier/"));
+
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & od_mtd);
+  fail_unless_equals_string (tag, "detector/yolov8");
+  g_free (tag);
+
+  /* Clear with NULL */
+  ret = gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & od_mtd, NULL);
+  fail_unless (ret == TRUE);
+
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & od_mtd);
+  fail_unless_equals_string (tag, "");
+  g_free (tag);
+
+  gst_buffer_unref (buf);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_mtd_semantic_tag_on_cls)
+{
+  /* Verify generic semantic tag works on classification metadata */
+  GstBuffer *buf;
+  GstAnalyticsRelationMeta *rmeta;
+  GstAnalyticsClsMtd cls_mtd;
+  gboolean ret;
+  gchar *tag;
+  gfloat conf_lvl[] = { 0.8f, 0.2f };
+  GQuark class_quarks[2];
+
+  class_quarks[0] = g_quark_from_string ("cat");
+  class_quarks[1] = g_quark_from_string ("dog");
+
+  buf = gst_buffer_new ();
+  rmeta = gst_buffer_add_analytics_relation_meta (buf);
+
+  ret = gst_analytics_relation_meta_add_cls_mtd (rmeta, 2, conf_lvl,
+      class_quarks, &cls_mtd);
+  fail_unless (ret == TRUE);
+
+  /* Set semantic tag on classification */
+  ret = gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & cls_mtd,
+      "classifier/resnet50");
+  fail_unless (ret == TRUE);
+
+  fail_unless (gst_analytics_mtd_has_semantic_tag (
+          (GstAnalyticsMtd *) & cls_mtd, "classifier/resnet50"));
+
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & cls_mtd);
+  fail_unless_equals_string (tag, "classifier/resnet50");
+  g_free (tag);
+
+  gst_buffer_unref (buf);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_mtd_semantic_tag_on_tracking)
+{
+  /* Verify generic semantic tag works on tracking metadata */
+  GstBuffer *buf;
+  GstAnalyticsRelationMeta *rmeta;
+  GstAnalyticsTrackingMtd trk_mtd;
+  gboolean ret;
+  gchar *tag;
+
+  buf = gst_buffer_new ();
+  rmeta = gst_buffer_add_analytics_relation_meta (buf);
+
+  ret = gst_analytics_relation_meta_add_tracking_mtd (rmeta, 42,
+      GST_CLOCK_TIME_NONE, &trk_mtd);
+  fail_unless (ret == TRUE);
+
+  ret = gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & trk_mtd,
+      "tracker/deepsort");
+  fail_unless (ret == TRUE);
+
+  fail_unless (gst_analytics_mtd_has_semantic_tag (
+          (GstAnalyticsMtd *) & trk_mtd, "tracker/deepsort"));
+  fail_unless (gst_analytics_mtd_semantic_tag_has_prefix (
+          (GstAnalyticsMtd *) & trk_mtd, "tracker/"));
+
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & trk_mtd);
+  fail_unless_equals_string (tag, "tracker/deepsort");
+  g_free (tag);
+
+  gst_buffer_unref (buf);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_mtd_semantic_tag_multiple_on_same_buffer)
+{
+  /* Verify different mtd on the same buffer can have independent tags */
+  GstBuffer *buf;
+  GstAnalyticsRelationMeta *rmeta;
+  GstAnalyticsODMtd od_mtd;
+  GstAnalyticsClsMtd cls_mtd;
+  gboolean ret;
+  gchar *tag;
+  gfloat conf_lvl[] = { 0.9f };
+  GQuark class_quarks[1];
+
+  class_quarks[0] = g_quark_from_string ("person");
+
+  buf = gst_buffer_new ();
+  rmeta = gst_buffer_add_analytics_relation_meta (buf);
+
+  GQuark type = g_quark_from_string ("person");
+  ret = gst_analytics_relation_meta_add_od_mtd (rmeta, type, 0, 0, 100, 200,
+      0.95f, &od_mtd);
+  fail_unless (ret == TRUE);
+
+  ret = gst_analytics_relation_meta_add_cls_mtd (rmeta, 1, conf_lvl,
+      class_quarks, &cls_mtd);
+  fail_unless (ret == TRUE);
+
+  /* Set different tags */
+  ret = gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & od_mtd,
+      "detector/yolo");
+  fail_unless (ret == TRUE);
+  ret = gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & cls_mtd,
+      "classifier/mobilenet");
+  fail_unless (ret == TRUE);
+
+  /* Verify they are independent */
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & od_mtd);
+  fail_unless_equals_string (tag, "detector/yolo");
+  g_free (tag);
+
+  tag = gst_analytics_mtd_get_semantic_tag ((GstAnalyticsMtd *) & cls_mtd);
+  fail_unless_equals_string (tag, "classifier/mobilenet");
+  g_free (tag);
+
+  /* Verify cross-check: one doesn't match the other's tag */
+  fail_unless (!gst_analytics_mtd_has_semantic_tag (
+          (GstAnalyticsMtd *) & od_mtd, "classifier/mobilenet"));
+  fail_unless (!gst_analytics_mtd_has_semantic_tag (
+          (GstAnalyticsMtd *) & cls_mtd, "detector/yolo"));
+
+  gst_buffer_unref (buf);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_mtd_semantic_tag_survives_copy)
+{
+  /* Verify semantic tags are preserved when buffer metadata is copied */
+  GstBuffer *buf, *buf2;
+  GstAnalyticsRelationMeta *rmeta, *rmeta2;
+  GstAnalyticsODMtd od_mtd;
+  GstAnalyticsClsMtd cls_mtd;
+  GstAnalyticsMtd mtd;
+  gboolean ret;
+  gchar *tag;
+  gfloat conf_lvl[] = { 0.7f };
+  GQuark class_quarks[1];
+  gpointer state = NULL;
+
+  class_quarks[0] = g_quark_from_string ("car");
+
+  buf = gst_buffer_new ();
+  rmeta = gst_buffer_add_analytics_relation_meta (buf);
+
+  GQuark type = g_quark_from_string ("car");
+  ret = gst_analytics_relation_meta_add_od_mtd (rmeta, type, 5, 10, 50, 60,
+      0.85f, &od_mtd);
+  fail_unless (ret == TRUE);
+
+  ret = gst_analytics_relation_meta_add_cls_mtd (rmeta, 1, conf_lvl,
+      class_quarks, &cls_mtd);
+  fail_unless (ret == TRUE);
+
+  gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & od_mtd,
+      "detector/ssd");
+  gst_analytics_mtd_set_semantic_tag ((GstAnalyticsMtd *) & cls_mtd,
+      "classifier/resnet");
+
+  /* Copy to new buffer */
+  buf2 = gst_buffer_new ();
+  ret = gst_buffer_copy_into (buf2, buf, GST_BUFFER_COPY_META, 0, -1);
+  fail_unless (ret == TRUE);
+
+  rmeta2 = gst_buffer_get_analytics_relation_meta (buf2);
+  fail_unless (rmeta2 != NULL);
+  fail_unless_equals_int (gst_analytics_relation_get_length (rmeta2), 2);
+
+  /* Check first mtd (OD) */
+  ret = gst_analytics_relation_meta_iterate (rmeta2, &state,
+      GST_ANALYTICS_MTD_TYPE_ANY, &mtd);
+  fail_unless (ret == TRUE);
+  tag = gst_analytics_mtd_get_semantic_tag (&mtd);
+  fail_unless_equals_string (tag, "detector/ssd");
+  g_free (tag);
+
+  /* Check second mtd (CLS) */
+  ret = gst_analytics_relation_meta_iterate (rmeta2, &state,
+      GST_ANALYTICS_MTD_TYPE_ANY, &mtd);
+  fail_unless (ret == TRUE);
+  tag = gst_analytics_mtd_get_semantic_tag (&mtd);
+  fail_unless_equals_string (tag, "classifier/resnet");
+  g_free (tag);
+
+  gst_buffer_unref (buf);
+  gst_buffer_unref (buf2);
+}
+
+GST_END_TEST;
+
 static Suite *
 analyticmeta_suite (void)
 {
@@ -3174,6 +3415,7 @@ analyticmeta_suite (void)
   TCase *tc_chain_tensor_mtd;
   TCase *tc_chain_group;
   TCase *tc_chain_keypoint;
+  TCase *tc_chain_semantic_tag;
 
   s = suite_create ("Analytic Meta Library");
 
@@ -3260,6 +3502,15 @@ analyticmeta_suite (void)
   tcase_add_test (tc_chain_keypoint, test_keypoints_group_with_confidences);
   tcase_add_test (tc_chain_keypoint, test_keypoints_group_without_confidences);
   tcase_add_test (tc_chain_keypoint, test_keypoint_group_2d_vs_3d);
+
+  tc_chain_semantic_tag = tcase_create ("Semantic Tag");
+  suite_add_tcase (s, tc_chain_semantic_tag);
+  tcase_add_test (tc_chain_semantic_tag, test_mtd_semantic_tag_on_od);
+  tcase_add_test (tc_chain_semantic_tag, test_mtd_semantic_tag_on_cls);
+  tcase_add_test (tc_chain_semantic_tag, test_mtd_semantic_tag_on_tracking);
+  tcase_add_test (tc_chain_semantic_tag,
+      test_mtd_semantic_tag_multiple_on_same_buffer);
+  tcase_add_test (tc_chain_semantic_tag, test_mtd_semantic_tag_survives_copy);
 
   return s;
 }

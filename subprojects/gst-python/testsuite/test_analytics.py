@@ -953,3 +953,77 @@ class TestAnalyticsGroupMtdSemanticTag(TestCase):
         self.assertEqual(group.get_semantic_tag(), "hand-21-kp")
         group.set_semantic_tag(None)
         self.assertEqual(group.get_semantic_tag(), "")
+
+
+class TestAnalyticsMtdSemanticTag(TestCase):
+    """Test generic semantic tag API on various metadata types."""
+
+    def test_semantic_tag_on_od_mtd(self):
+        """semantic tag can be set and read on object detection metadata"""
+        buf = Gst.Buffer()
+        rmeta = GstAnalytics.buffer_add_analytics_relation_meta(buf)
+        qk = GLib.quark_from_string("person")
+        ret, od = rmeta.add_od_mtd(qk, 10, 20, 30, 40, 0.9)
+        self.assertTrue(ret)
+
+        self.assertEqual(od.get_semantic_tag(), "")
+        od.set_semantic_tag("detector/yolov8")
+        self.assertEqual(od.get_semantic_tag(), "detector/yolov8")
+        self.assertTrue(od.has_semantic_tag("detector/yolov8"))
+        self.assertFalse(od.has_semantic_tag("detector/ssd"))
+        self.assertTrue(od.semantic_tag_has_prefix("detector/"))
+        self.assertFalse(od.semantic_tag_has_prefix("classifier/"))
+
+    def test_semantic_tag_on_cls_mtd(self):
+        """semantic tag can be set and read on classification metadata"""
+        buf = Gst.Buffer()
+        rmeta = GstAnalytics.buffer_add_analytics_relation_meta(buf)
+        qks = (GLib.quark_from_string("cat"), GLib.quark_from_string("dog"))
+        ret, cls = rmeta.add_cls_mtd([0.8, 0.2], qks)
+        self.assertTrue(ret)
+
+        cls.set_semantic_tag("classifier/resnet50")
+        self.assertEqual(cls.get_semantic_tag(), "classifier/resnet50")
+        self.assertTrue(cls.has_semantic_tag("classifier/resnet50"))
+
+    def test_semantic_tag_on_tracking_mtd(self):
+        """semantic tag can be set and read on tracking metadata"""
+        buf = Gst.Buffer()
+        rmeta = GstAnalytics.buffer_add_analytics_relation_meta(buf)
+        ret, trk = rmeta.add_tracking_mtd(42, 10)
+        self.assertTrue(ret)
+
+        trk.set_semantic_tag("tracker/deepsort")
+        self.assertEqual(trk.get_semantic_tag(), "tracker/deepsort")
+        self.assertTrue(trk.semantic_tag_has_prefix("tracker/"))
+
+    def test_semantic_tag_independent_across_mtd(self):
+        """different mtd on the same buffer have independent semantic tags"""
+        buf = Gst.Buffer()
+        rmeta = GstAnalytics.buffer_add_analytics_relation_meta(buf)
+
+        qk = GLib.quark_from_string("person")
+        _, od = rmeta.add_od_mtd(qk, 0, 0, 100, 200, 0.95)
+        _, cls = rmeta.add_cls_mtd([0.9], (GLib.quark_from_string("person"),))
+
+        od.set_semantic_tag("detector/yolo")
+        cls.set_semantic_tag("classifier/mobilenet")
+
+        self.assertEqual(od.get_semantic_tag(), "detector/yolo")
+        self.assertEqual(cls.get_semantic_tag(), "classifier/mobilenet")
+        self.assertFalse(od.has_semantic_tag("classifier/mobilenet"))
+        self.assertFalse(cls.has_semantic_tag("detector/yolo"))
+
+    def test_semantic_tag_clear_with_none(self):
+        """setting semantic tag to None clears it"""
+        buf = Gst.Buffer()
+        rmeta = GstAnalytics.buffer_add_analytics_relation_meta(buf)
+        qk = GLib.quark_from_string("car")
+        _, od = rmeta.add_od_mtd(qk, 5, 10, 50, 60, 0.85)
+
+        od.set_semantic_tag("detector/ssd")
+        self.assertEqual(od.get_semantic_tag(), "detector/ssd")
+
+        od.set_semantic_tag(None)
+        self.assertEqual(od.get_semantic_tag(), "")
+        self.assertFalse(od.has_semantic_tag("detector/ssd"))

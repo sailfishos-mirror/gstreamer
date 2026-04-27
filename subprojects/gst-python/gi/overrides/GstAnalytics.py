@@ -47,6 +47,25 @@ class Mtd(GstAnalytics.Mtd):
             return False
         return self.meta == other.meta and self.id == other.id
 
+    def _as_base_mtd(self):
+        """Return a GstAnalytics.Mtd with the same id/meta so GIR methods on Mtd are reachable."""
+        m = GstAnalytics.Mtd()
+        m.id = self.id
+        m.meta = self.meta
+        return m
+
+    def set_semantic_tag(self, tag):
+        return self._as_base_mtd().set_semantic_tag(tag)
+
+    def get_semantic_tag(self):
+        return self._as_base_mtd().get_semantic_tag()
+
+    def has_semantic_tag(self, tag):
+        return self._as_base_mtd().has_semantic_tag(tag)
+
+    def semantic_tag_has_prefix(self, prefix):
+        return self._as_base_mtd().semantic_tag_has_prefix(prefix)
+
     def iter_direct_related(self, relation, mtd_type=GstAnalytics.Mtd):
         if mtd_type != GstAnalytics.Mtd:
             mtd_type = mtd_type.get_mtd_type()
@@ -109,7 +128,7 @@ class RelationMeta(GstAnalytics.RelationMeta):
 __all__.append('RelationMeta')
 
 
-class GroupMtd(GstAnalytics.GroupMtd):
+class GroupMtd(GstAnalytics.GroupMtd, Mtd):
     def __iter__(self):
         return _gi_gst_analytics.AnalyticsGroupMtdIterator(sys.modules[__name__], self)
 

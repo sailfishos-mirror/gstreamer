@@ -428,7 +428,7 @@ gst_analytics_relation_meta_add_keypoints_group (GstAnalyticsRelationMeta *
   }
 
   /* Set semantic tag */
-  gst_analytics_group_mtd_set_semantic_tag (group_mtd, semantic_tag);
+  gst_analytics_mtd_set_semantic_tag (group_mtd, semantic_tag);
 
   /* Allocate array to store keypoint IDs for skeleton processing */
   keypoint_ids = g_malloc_n (keypoint_count, sizeof (guint));
