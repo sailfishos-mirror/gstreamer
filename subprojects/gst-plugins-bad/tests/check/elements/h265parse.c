@@ -400,6 +400,93 @@ GST_START_TEST (test_parse_detect_stream_with_hdr_sei)
 
 GST_END_TEST;
 
+static inline GstBuffer *wrap_buffer (const guint8 * buf, gsize size,
+    GstClockTime pts, GstBufferFlags flags);
+static inline GstBuffer *composite_buffer (GstClockTime pts,
+    GstBufferFlags flags, gint count, ...);
+static GstCaps *pull_last_caps_event (GstHarness * h);
+
+/* Verify that mastering-display-info, content-light-level and hdr-format are
+ * removed from caps when the HDR SEIs disappear from the bitstream.
+ *
+ * The parser state machine for HDR SEIs:
+ *   EXPIRED → (SEI seen) → PARSED → (IRAP) → ACTIVE → (IRAP, no SEI) → EXPIRED
+ *
+ * Sequence:
+ *   AU1: VPS+SPS+PPS+CLLI+MDC+IDR → state PARSED→ACTIVE, caps WITH hdr-format=hdr10
+ *   AU2: IDR only (no SEI)         → state ACTIVE→EXPIRED, update_caps=TRUE,
+ *                                    caps WITHOUT hdr-format
+ *   AU3: IDR only (no SEI)         → state stays EXPIRED, no caps event
+ */
+#define bytestream_set_caps(h, in_align, out_align) \
+  gst_harness_set_caps_str (h, \
+      "video/x-h265, parsed=(boolean)false, stream-format=byte-stream, alignment=" in_align ", framerate=30/1", \
+      "video/x-h265, parsed=(boolean)true, stream-format=byte-stream, alignment=" out_align)
+
+GST_START_TEST (test_parse_detect_stream_hdr_sei_expiry)
+{
+  GstHarness *h = gst_harness_new ("h265parse");
+  GstCaps *caps;
+  GstStructure *s;
+  GstBuffer *buf;
+
+  bytestream_set_caps (h, "au", "au");
+
+  /* AU1: full headers + HDR SEIs + IDR → parser emits caps with HDR fields */
+  buf = composite_buffer (10, 0, 6,
+      h265_vps, sizeof (h265_vps),
+      h265_sps, sizeof (h265_sps),
+      h265_pps, sizeof (h265_pps),
+      h265_sei_clli, sizeof (h265_sei_clli),
+      h265_sei_mdcv, sizeof (h265_sei_mdcv), h265_idr, sizeof (h265_idr));
+  fail_unless_equals_int (gst_harness_push (h, buf), GST_FLOW_OK);
+  fail_unless (gst_harness_buffers_in_queue (h) == 1);
+
+  caps = pull_last_caps_event (h);
+  fail_unless (caps != NULL);
+  s = gst_caps_get_structure (caps, 0);
+  fail_unless_structure_field_string_equals (s, "mastering-display-info",
+      "34000:16000:13250:34500:7500:3000:15635:16450:10000000:1");
+  fail_unless_structure_field_string_equals (s, "content-light-level",
+      "1000:400");
+  fail_unless_structure_field_string_equals (s, "hdr-format", "hdr10");
+  gst_caps_unref (caps);
+  while (gst_harness_buffers_in_queue (h) > 0) {
+    GstBuffer *b = gst_harness_pull (h);
+    gst_buffer_unref (b);
+  }
+
+  /* AU2: IDR without HDR SEIs → state ACTIVE→EXPIRED, update_caps=TRUE → caps
+   * WITHOUT HDR fields */
+  buf = wrap_buffer (h265_idr, sizeof (h265_idr), 20, 0);
+  fail_unless_equals_int (gst_harness_push (h, buf), GST_FLOW_OK);
+  caps = pull_last_caps_event (h);
+  fail_unless (caps != NULL);
+  s = gst_caps_get_structure (caps, 0);
+  fail_if (gst_structure_has_field (s, "mastering-display-info"));
+  fail_if (gst_structure_has_field (s, "content-light-level"));
+  fail_if (gst_structure_has_field (s, "hdr-format"));
+  gst_caps_unref (caps);
+  while (gst_harness_buffers_in_queue (h) > 0) {
+    GstBuffer *b = gst_harness_pull (h);
+    gst_buffer_unref (b);
+  }
+
+  /* AU3: IDR without HDR SEIs → state is EXPIRED, no caps event */
+  buf = wrap_buffer (h265_idr, sizeof (h265_idr), 30, 0);
+  fail_unless_equals_int (gst_harness_push (h, buf), GST_FLOW_OK);
+  caps = pull_last_caps_event (h);
+  fail_if (caps != NULL);
+  while (gst_harness_buffers_in_queue (h) > 0) {
+    GstBuffer *b = gst_harness_pull (h);
+    gst_buffer_unref (b);
+  }
+
+  gst_harness_teardown (h);
+}
+
+GST_END_TEST;
+
 GST_START_TEST (test_parse_detect_stream_with_hdrplus_sei)
 {
   GstCaps *caps;
@@ -453,6 +540,7 @@ h265parse_suite (void)
   tcase_add_test (tc_chain, test_parse_split);
   tcase_add_test (tc_chain, test_parse_detect_stream);
   tcase_add_test (tc_chain, test_parse_detect_stream_with_hdr_sei);
+  tcase_add_test (tc_chain, test_parse_detect_stream_hdr_sei_expiry);
   tcase_add_test (tc_chain, test_parse_detect_stream_with_hdrplus_sei);
 
   return s;
@@ -550,11 +638,6 @@ pull_and_check_full (GstHarness * h, const guint8 * data, gsize size,
   const gsize slice_1_size = sliced ? sizeof (h265_128x128_slice_1_idr_n_lp) : sizeof (h265_128x128_slice_idr_n_lp); \
   const gsize slice_2_size = sliced ? sizeof (h265_128x128_slice_2_idr_n_lp) : 0
 
-#define bytestream_set_caps(h, in_align, out_align) \
-  gst_harness_set_caps_str (h, \
-      "video/x-h265, parsed=(boolean)false, stream-format=byte-stream, alignment=" in_align ", framerate=30/1", \
-      "video/x-h265, parsed=(boolean)true, stream-format=byte-stream, alignment=" out_align)
-
 static inline void
 bytestream_push_first_au_inalign_nal (GstHarness * h, gboolean sliced)
 {
@@ -591,6 +674,28 @@ bytestream_push_first_au_inalign_au (GstHarness * h, gboolean sliced)
       vps, vps_size, sps, sps_size, pps, pps_size,
       slice_1, slice_1_size, slice_2, slice_2_size);
   fail_unless_equals_int (gst_harness_push (h, buf), GST_FLOW_OK);
+}
+
+static GstCaps *
+pull_last_caps_event (GstHarness * h)
+{
+  GstCaps *caps = NULL;
+  GstEvent *event;
+
+  while ((event = gst_harness_try_pull_event (h)) != NULL) {
+    if (GST_EVENT_TYPE (event) == GST_EVENT_CAPS) {
+      GstCaps *event_caps;
+
+      gst_event_parse_caps (event, &event_caps);
+      if (caps)
+        gst_caps_unref (caps);
+      caps = gst_caps_copy (event_caps);
+    }
+
+    gst_event_unref (event);
+  }
+
+  return caps;
 }
 
 /* tests */

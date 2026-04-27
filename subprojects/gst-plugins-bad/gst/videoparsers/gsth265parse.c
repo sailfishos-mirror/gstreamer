@@ -964,6 +964,11 @@ gst_h265_parse_process_nal (GstH265Parse * h265parse, GstH265NalUnit * nalu)
       if (no_rasl_output_flag && is_irap
           && slice.first_slice_segment_in_pic_flag == 1) {
         if (h265parse->mastering_display_info_state ==
+            GST_H265_PARSE_SEI_ACTIVE ||
+            h265parse->content_light_level_state == GST_H265_PARSE_SEI_ACTIVE)
+          h265parse->update_caps = TRUE;
+
+        if (h265parse->mastering_display_info_state ==
             GST_H265_PARSE_SEI_PARSED)
           h265parse->mastering_display_info_state = GST_H265_PARSE_SEI_ACTIVE;
         else if (h265parse->mastering_display_info_state ==

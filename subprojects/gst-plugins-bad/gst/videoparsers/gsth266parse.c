@@ -826,6 +826,11 @@ gst_h266_parse_process_nal (GstH266Parse * h266parse, GstH266NalUnit * nalu)
 
       if (ph->gdr_or_irap_pic_flag) {
         if (h266parse->mastering_display_info_state ==
+            GST_H266_PARSE_SEI_ACTIVE ||
+            h266parse->content_light_level_state == GST_H266_PARSE_SEI_ACTIVE)
+          h266parse->update_caps = TRUE;
+
+        if (h266parse->mastering_display_info_state ==
             GST_H266_PARSE_SEI_PARSED)
           h266parse->mastering_display_info_state = GST_H266_PARSE_SEI_ACTIVE;
         else if (h266parse->mastering_display_info_state ==
@@ -888,6 +893,11 @@ gst_h266_parse_process_nal (GstH266Parse * h266parse, GstH266NalUnit * nalu)
 
       /* if slice.picture_header_in_slice_header_flag == 0, PH will do this. */
       if (is_irap_or_gdr && slice.picture_header_in_slice_header_flag) {
+        if (h266parse->mastering_display_info_state ==
+            GST_H266_PARSE_SEI_ACTIVE ||
+            h266parse->content_light_level_state == GST_H266_PARSE_SEI_ACTIVE)
+          h266parse->update_caps = TRUE;
+
         if (h266parse->mastering_display_info_state ==
             GST_H266_PARSE_SEI_PARSED)
           h266parse->mastering_display_info_state = GST_H266_PARSE_SEI_ACTIVE;

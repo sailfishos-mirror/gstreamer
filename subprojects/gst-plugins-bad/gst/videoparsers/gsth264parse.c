@@ -1182,6 +1182,11 @@ gst_h264_parse_process_nal (GstH264Parse * h264parse, GstH264NalUnit * nalu)
       /* Reset state only on first IDR slice of CVS D.2.29 */
       if (slice.first_mb_in_slice == 0) {
         if (h264parse->mastering_display_info_state ==
+            GST_H264_PARSE_SEI_ACTIVE ||
+            h264parse->content_light_level_state == GST_H264_PARSE_SEI_ACTIVE)
+          h264parse->update_caps = TRUE;
+
+        if (h264parse->mastering_display_info_state ==
             GST_H264_PARSE_SEI_PARSED)
           h264parse->mastering_display_info_state = GST_H264_PARSE_SEI_ACTIVE;
         else if (h264parse->mastering_display_info_state ==
