@@ -1654,7 +1654,7 @@ gst_h264_encoder_finish_last_frame (GstH264Encoder * self)
   ret = gst_h264_encoder_finish_frame (self, frame);
 
   if (ret != GST_FLOW_OK) {
-    GST_DEBUG_OBJECT (self, "fails to push one buffer, system_frame_number "
+    GST_INFO_OBJECT (self, "failed to push one buffer, system_frame_number "
         "%d: %s", system_frame_number, gst_flow_get_name (ret));
   }
 
@@ -2491,12 +2491,12 @@ gst_h264_encoder_handle_frame (GstVideoEncoder * encoder,
         ret = gst_h264_encoder_finish_last_frame (self);
 
       if (ret != GST_FLOW_OK)
-        goto error_push_buffer;
+        return ret;
 
       /* Try to push out all ready frames. */
       ret = gst_h264_encoder_try_to_finish_all_frames (self);
       if (ret != GST_FLOW_OK)
-        goto error_push_buffer;
+        return ret;
 
       frame_encode = NULL;
       if (!gst_h264_encoder_reorder_frame (self, NULL, FALSE, &frame_encode))
@@ -2506,7 +2506,7 @@ gst_h264_encoder_handle_frame (GstVideoEncoder * encoder,
     /* Try to push out all ready frames. */
     ret = gst_h264_encoder_try_to_finish_all_frames (self);
     if (ret != GST_FLOW_OK)
-      goto error_push_buffer;
+      return ret;
   }
 
   return ret;
@@ -2535,12 +2535,6 @@ error_encode:
         ("Failed to encode the frame %s.", gst_flow_get_name (ret)), (NULL));
     gst_clear_buffer (&frame_encode->output_buffer);
     gst_video_encoder_finish_frame (encoder, frame_encode);
-    return ret;
-  }
-error_push_buffer:
-  {
-    GST_ELEMENT_ERROR (encoder, STREAM, ENCODE,
-        ("Failed to finish frame."), (NULL));
     return ret;
   }
 }
