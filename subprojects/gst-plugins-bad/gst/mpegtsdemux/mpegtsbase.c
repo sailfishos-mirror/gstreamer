@@ -2012,8 +2012,6 @@ mpegts_base_handle_seek_event (MpegTSBase * base, GstPad * pad,
     flush_event = NULL;
   }
 
-  if (flush_event)
-    gst_event_unref (flush_event);
   gst_pad_start_task (base->sinkpad, (GstTaskFunction) mpegts_base_loop, base,
       NULL);
 
