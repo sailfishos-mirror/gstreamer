@@ -188,18 +188,16 @@ if host_machine.system() != 'windows'
   ]
 endif
 
-if ['darwin', 'ios'].contains(host_system)
-  videotoolbox_dep = dependency('VideoToolbox', required : false)
+if host_system == 'darwin'
+  videotoolbox_dep = dependency('VideoToolbox')
   base_tests += [
-    [['pipelines/avfassetsrc-supplemental.c'],
-        not videotoolbox_dep.found(), [videotoolbox_dep]],
+    [['pipelines/avfassetsrc-supplemental.c'], false, [videotoolbox_dep]],
     [['pipelines/avfassetsrc-partial.c']],
-    [['pipelines/vtdec-output-paths.c'],
-        not videotoolbox_dep.found(), [videotoolbox_dep]],
+    [['pipelines/vtdec-output-paths.c']],
   ]
 
   if subsystem == 'macos'
-    basic_tests += [
+    base_tests += [
       [['elements/avfdeviceidentity.c']]
     ]
   endif
