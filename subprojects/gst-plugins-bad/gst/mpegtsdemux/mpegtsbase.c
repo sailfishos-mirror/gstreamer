@@ -623,9 +623,13 @@ find_registration_in_descriptors (GPtrArray * descriptors,
   for (i = 0; i < nb_desc; i++) {
     GstMpegtsDescriptor *desc = g_ptr_array_index (descriptors, i);
     if (desc->tag == GST_MTS_DESC_REGISTRATION) {
-      guint32 reg_desc = GST_READ_UINT32_BE (desc->data + 2);
-      if (reg_desc == registration_id)
-        return TRUE;
+      if (G_UNLIKELY (desc->length < 4)) {
+        GST_WARNING ("Registration descriptor with length < 4. (Corrupted ?)");
+      } else {
+        guint32 reg_desc = GST_READ_UINT32_BE (desc->data + 2);
+        if (reg_desc == registration_id)
+          return TRUE;
+      }
     }
   }
   return FALSE;
