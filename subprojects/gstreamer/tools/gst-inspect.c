@@ -194,7 +194,14 @@ holds_long_type (const GValue * v)
 static gboolean
 print_field (const GstIdStr * fieldname, const GValue * value, gpointer pfx)
 {
-  const gchar *type_name = g_type_name (G_VALUE_TYPE (value));
+  const gchar *type_name;
+
+  // gchararray -> string for caps fields
+  if (G_VALUE_HOLDS (value, G_TYPE_STRING)) {
+    type_name = "string";
+  } else {
+    type_name = g_type_name (G_VALUE_TYPE (value));
+  }
 
   if (G_VALUE_HOLDS (value, GST_TYPE_UNIQUE_LIST)
       && gst_value_unique_list_get_size (value) > 0) {
