@@ -177,7 +177,7 @@ mpegts_parse_pes_header (const guint8 * data, gsize length, PESHeader * res)
       goto need_more_data;
 
     guint32 escr1 = GST_READ_UINT32_BE (data);
-    guint16 escr2 = GST_READ_UINT16_BE (data);
+    guint16 escr2 = GST_READ_UINT16_BE (data + 4);
     guint64 escr, escr_ext;
 
     escr = ((guint64) escr1) << 1;
