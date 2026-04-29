@@ -527,8 +527,11 @@ gst_v4l2_buffer_pool_alloc_buffer (GstBufferPool * bpool, GstBuffer ** buffer,
       gst_video_meta_set_alignment (videometa, obj->align);
   }
 
-  gst_buffer_add_reference_timestamp_meta (newbuf,
-      gst_v4l2_buffer_pool_get_ts_mono_caps (), 0, GST_CLOCK_TIME_NONE);
+  if (V4L2_TYPE_IS_CAPTURE (obj->type) && !GST_V4L2_IS_M2M (obj->device_caps)) {
+    gst_buffer_add_reference_timestamp_meta (newbuf,
+        gst_v4l2_buffer_pool_get_ts_mono_caps (), 0, GST_CLOCK_TIME_NONE);
+    GST_DEBUG_OBJECT (obj->dbg_obj, "Adding reference timestamp meta");
+  }
 
   *buffer = newbuf;
 
@@ -1477,16 +1480,22 @@ gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer,
 
   GstReferenceTimestampMeta *meta = (GstReferenceTimestampMeta *)
       gst_buffer_get_meta (outbuf, GST_REFERENCE_TIMESTAMP_META_API_TYPE);
-  meta->reference = gst_caps_make_writable (meta->reference);
-  meta->timestamp = timestamp;
+  if (meta) {
+    meta->reference = gst_caps_make_writable (meta->reference);
+    meta->timestamp = timestamp;
 
-  const gchar *meta_ts_type = obj->driver_ts_type;
-  if (group->buffer.flags & V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC)
-    meta_ts_type = obj->mono_ts_type;
+    const gchar *meta_ts_type = obj->driver_ts_type;
+    if (group->buffer.flags & V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC)
+      meta_ts_type = obj->mono_ts_type;
 
-  GstStructure *meta_struct = gst_caps_get_structure (meta->reference, 0);
-  if (!gst_structure_has_name (meta_struct, meta_ts_type))
-    gst_structure_set_name (meta_struct, meta_ts_type);
+    if (meta_ts_type) {
+      GstStructure *meta_struct = gst_caps_get_structure (meta->reference, 0);
+      if (!gst_structure_has_name (meta_struct, meta_ts_type))
+        gst_structure_set_name (meta_struct, meta_ts_type);
+    } else {
+      GST_WARNING_OBJECT (pool, "No reference timestamp type available");
+    }
+  }
 
   GST_BUFFER_TIMESTAMP (outbuf) = timestamp;
   GST_BUFFER_OFFSET (outbuf) = group->buffer.sequence;
